@@ -44,7 +44,7 @@ Desktop.ini
 # *.zip
 
 # Test PDFs (large binary files)
-# *.pdf
+*.pdf
 
 # Logs
 *.log
