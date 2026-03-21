@@ -266,7 +266,8 @@ module BlueCollarSystems
                 e = safe_add_line(entities, sp, ep, layer, dash_layer, dash_spec)
                 all_edges << e if e
               end
-            rescue => ex
+            rescue StandardError => ex
+              Logger.warn("GeometryBuilder", "arc creation failed: #{ex.message}")
               # Arc creation failed — fall back to lines through the points
               seg[:points].each_cons(2) do |pa, pb|
                 p1 = Geom::Point3d.new(pa[0], pa[1], 0)
@@ -421,7 +422,8 @@ module BlueCollarSystems
                   @text_count += 1
                 end
               end
-            rescue => e
+            rescue StandardError => e
+              Logger.warn("GeometryBuilder", "add_3d_text failed: #{e.message}")
               # Fallback to annotation text
               begin
                 text = entities.add_text(item.text, pt)
