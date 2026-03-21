@@ -46,5 +46,8 @@ Desktop.ini
 # Test PDFs (large binary files)
 *.pdf
 
+# Development extraction artifacts
+extracted/
+
 # Logs
 *.log

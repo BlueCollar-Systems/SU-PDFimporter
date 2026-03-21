@@ -189,6 +189,19 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ---
 
+## AI Contributors
+
+This project was developed with significant contributions from AI assistants:
+
+- **Claude & Claude Code** (Anthropic) — Architecture, code generation, debugging, and code review
+- **ChatGPT & Codex** (OpenAI) — Code generation and problem-solving assistance
+- **Gemini** (Google) — Development assistance and code suggestions
+- **Microsoft Copilot** — Code completion and development support
+
+These AI tools were used as collaborative development partners throughout the project lifecycle.
+
+---
+
 ## Author
 
 **BlueCollar Systems** -- BUILT. NOT BOUGHT.
