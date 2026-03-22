@@ -38,10 +38,9 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# SketchUp extension package builds
-# (uncomment if you don't want to track built packages)
-# *.rbz
-# *.zip
+# SketchUp extension package builds (use GitHub Releases instead)
+*.rbz
+*.zip
 
 # Test PDFs (large binary files)
 *.pdf
