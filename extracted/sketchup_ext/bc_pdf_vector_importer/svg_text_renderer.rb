@@ -93,8 +93,12 @@ module BlueCollarSystems
         end
 
         { edges: edge_count, glyphs: glyph_count }
-      rescue => e
-        Logger.warn("SvgTextRenderer", "Failed: #{e.message}") rescue nil
+      rescue StandardError => e
+        begin
+          Logger.warn("SvgTextRenderer", "Failed: #{e.message}")
+        rescue StandardError
+          # Logger may be unavailable in minimal runtime/test contexts.
+        end
         nil
       ensure
         begin

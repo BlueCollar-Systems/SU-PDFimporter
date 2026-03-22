@@ -53,7 +53,12 @@ module BlueCollarSystems
         circles = 0
         prims.each do |p|
           next unless p.type == :closed_loop && p.points && p.points.length >= 8
-          fit = ArcFitter.circle_fit(p.points) rescue nil
+          fit = nil
+          begin
+            fit = ArcFitter.circle_fit(p.points)
+          rescue StandardError => e
+            Logger.warn("DocumentProfiler", "circle_fit failed: #{e.message}")
+          end
           circles += 1 if fit && fit[3] < 0.02
         end
 

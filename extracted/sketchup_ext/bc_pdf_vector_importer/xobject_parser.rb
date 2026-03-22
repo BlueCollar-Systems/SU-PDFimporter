@@ -200,7 +200,12 @@ module BlueCollarSystems
       def to_dict(obj)
         return obj if obj.is_a?(Hash)
         if obj.is_a?(String) && obj.include?('<<')
-          @pdf.send(:parse_dict_string, obj) rescue nil
+          begin
+            @pdf.send(:parse_dict_string, obj)
+          rescue StandardError => e
+            Logger.warn("XObjectParser", "parse_dict_string failed: #{e.message}")
+            nil
+          end
         else
           nil
         end
@@ -220,7 +225,12 @@ module BlueCollarSystems
         if val.is_a?(Array)
           return val.map { |v| v.to_s.to_f }
         elsif val.is_a?(String)
-          @pdf.send(:parse_array_string, val).map { |v| v.to_s.to_f } rescue []
+          begin
+            @pdf.send(:parse_array_string, val).map { |v| v.to_s.to_f }
+          rescue StandardError => e
+            Logger.warn("XObjectParser", "parse_array_string failed: #{e.message}")
+            []
+          end
         else
           []
         end

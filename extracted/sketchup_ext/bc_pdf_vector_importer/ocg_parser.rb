@@ -99,7 +99,12 @@ module BlueCollarSystems
         return obj if obj.is_a?(Hash)
         if obj.is_a?(String) && obj.include?('<<')
           # Attempt to parse as dict
-          @pdf.send(:parse_dict_string, obj) rescue nil
+          begin
+            @pdf.send(:parse_dict_string, obj)
+          rescue StandardError => e
+            Logger.warn("OCGParser", "parse_dict_string failed: #{e.message}")
+            nil
+          end
         else
           nil
         end

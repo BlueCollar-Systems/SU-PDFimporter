@@ -130,7 +130,13 @@ module BlueCollarSystems
             edges = entities.add_edges(clean)
             if edges
               stats[:edges] += edges.length
-              edges.each { |e| e.layer = target_layer rescue nil }
+              edges.each do |edge|
+                begin
+                  edge.layer = target_layer if target_layer
+                rescue StandardError => e
+                  Logger.warn("SvgGeometryRenderer", "edge layer assignment failed: #{e.message}")
+                end
+              end
             end
 
             # Create face from closed filled paths
@@ -140,7 +146,11 @@ module BlueCollarSystems
                 face = entities.add_face(clean)
                 if face
                   stats[:faces] += 1
-                  face.layer = base_layer rescue nil
+                  begin
+                    face.layer = base_layer if base_layer
+                  rescue StandardError => e
+                    Logger.warn("SvgGeometryRenderer", "face layer assignment failed: #{e.message}")
+                  end
                 end
               rescue StandardError => e
                 Logger.warn("SvgGeometryRenderer", "add_face failed: #{e.message}")
@@ -193,7 +203,11 @@ module BlueCollarSystems
             begin
               inst = entities.add_instance(defn,
                 Geom::Transformation.new(Geom::Point3d.new(x_inch, y_inch, 0.0)))
-              inst.layer = text_layer rescue nil
+              begin
+                inst.layer = text_layer if text_layer
+              rescue StandardError => e
+                Logger.warn("SvgGeometryRenderer", "glyph layer assignment failed: #{e.message}")
+              end
               stats[:glyphs] += 1
             rescue StandardError => e
               Logger.warn("SvgGeometryRenderer", "add_instance for glyph failed: #{e.message}")
@@ -211,11 +225,19 @@ module BlueCollarSystems
           stats[:cleanup] = cl
         end
 
-        page_group.layer = base_layer rescue nil
+        begin
+          page_group.layer = base_layer if page_group && base_layer
+        rescue StandardError => e
+          Logger.warn("SvgGeometryRenderer", "page group layer assignment failed: #{e.message}")
+        end
 
         stats
-      rescue => e
-        Logger.warn("SvgGeometryRenderer", "Failed: #{e.message}") rescue nil
+      rescue StandardError => e
+        begin
+          Logger.warn("SvgGeometryRenderer", "Failed: #{e.message}")
+        rescue StandardError
+          # Logger may be unavailable in minimal runtime/test contexts.
+        end
         nil
       ensure
         begin

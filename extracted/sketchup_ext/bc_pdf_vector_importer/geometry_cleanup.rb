@@ -125,10 +125,14 @@ module BlueCollarSystems
                   # Move the start point
                   other = edge.end.position
                   if other.distance(target_pos) > 0.0001
-                    entities.transform_entities(
-                      Geom::Transformation.new(target_pos - victim.position),
-                      edge.start
-                    ) rescue nil
+                    begin
+                      entities.transform_entities(
+                        Geom::Transformation.new(target_pos - victim.position),
+                        edge.start
+                      )
+                    rescue StandardError => e
+                      Logger.warn("GeometryCleanup", "transform_entities failed: #{e.message}")
+                    end
                   end
                 end
               end

@@ -418,7 +418,13 @@ module BlueCollarSystems
                     xform = xform * rot
                   end
                   entities.transform_entities(xform, *new_ents)
-                  new_ents.each { |e| set_layer(e, layer) rescue nil }
+                  new_ents.each do |entity|
+                    begin
+                      set_layer(entity, layer)
+                    rescue StandardError => e
+                      Logger.warn("GeometryBuilder", "set_layer on text geometry failed: #{e.message}")
+                    end
+                  end
                   @text_count += 1
                 end
               end
@@ -661,8 +667,19 @@ module BlueCollarSystems
 
         begin
           styles = @model.line_styles
-          style = styles[style_name] rescue nil
-          style ||= styles.to_a.find { |s| s.display_name.to_s.downcase == style_name.downcase } rescue nil
+          style = nil
+          begin
+            style = styles[style_name]
+          rescue StandardError => e
+            Logger.warn("GeometryBuilder", "line style lookup by key failed: #{e.message}")
+          end
+          if style.nil?
+            begin
+              style = styles.to_a.find { |s| s.display_name.to_s.downcase == style_name.downcase }
+            rescue StandardError => e
+              Logger.warn("GeometryBuilder", "line style lookup by name failed: #{e.message}")
+            end
+          end
           layer.line_style = style if style
         rescue StandardError => e
           Logger.warn("GeometryBuilder", "apply_layer_line_style failed: #{e.message}")

@@ -36,7 +36,11 @@ module BlueCollarSystems
           html = File.read(out_html)
           parse_bbox_html(html)
         rescue StandardError => e
-          Logger.warn('ExternalTextExtractor', "pdftotext fallback: #{e.message}") rescue nil
+          begin
+            Logger.warn('ExternalTextExtractor', "pdftotext fallback: #{e.message}")
+          rescue StandardError
+            # Logger may be unavailable in stripped test/runtime contexts.
+          end
           []
         ensure
           begin

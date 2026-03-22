@@ -19,8 +19,9 @@ module BlueCollarSystems
           data.each do |key, value|
             entity.set_attribute(DICT_NAME, key.to_s, value.to_s)
           end
-        rescue => e
+        rescue StandardError => e
           # Attribute writing can fail on some entity types — not critical
+          Logger.warn("Metadata", "attach failed: #{e.message}")
         end
       end
 

@@ -78,7 +78,12 @@ module BlueCollarSystems
           next unless p.type == :closed_loop && p.closed
           next unless p.points && p.points.length >= 6
 
-          fit = ArcFitter.circle_fit(p.points) rescue nil
+          fit = nil
+          begin
+            fit = ArcFitter.circle_fit(p.points)
+          rescue StandardError => e
+            Logger.warn("GenericRecognizer", "circle_fit failed: #{e.message}")
+          end
           next unless fit
           cx, cy, r, rms = fit
           next if rms > config.circle_fit_tol

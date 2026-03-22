@@ -47,6 +47,20 @@ module BlueCollarSystems
     # ================================================================
     # SHARED PIPELINE — single source of truth for all import paths
     # ================================================================
+    def self.safe_abort_operation(model, source)
+      return unless model
+      model.abort_operation
+    rescue StandardError => e
+      Logger.warn(source, "abort_operation failed: #{e.message}")
+    end
+
+    def self.safe_find_pdftocairo
+      SvgTextRenderer.find_pdftocairo
+    rescue StandardError => e
+      Logger.warn("Raster", "pdftocairo lookup failed: #{e.message}")
+      nil
+    end
+
     def self.run_pipeline(model, path, opts)
       Logger.reset
       config = RecognitionConfig.default
@@ -66,7 +80,7 @@ module BlueCollarSystems
             pg = p.pages.first
             media_box = pg[:media_box] if pg && pg[:media_box]
           end
-        rescue => e
+        rescue StandardError => e
           Logger.warn("Pipeline", "Could not read page size: #{e.message}")
         end
         raster_ok = import_page_as_raster(model, path, 1, media_box, opts, import_start)
@@ -103,7 +117,7 @@ module BlueCollarSystems
                      elapsed_seconds: (Time.now - import_start).round(1),
                      raster_fallback_used: true }
           else
-            model.abort_operation rescue nil
+            safe_abort_operation(model, "Pipeline")
           end
         end
         return nil
@@ -351,7 +365,7 @@ module BlueCollarSystems
           # Restore text tag visibility
           text_tag.visible = true if text_tag && was_visible
         end
-      rescue => e
+      rescue StandardError => e
         Logger.warn("Pipeline", "Auto-fit view failed: #{e.message}")
       end
 
@@ -362,7 +376,7 @@ module BlueCollarSystems
     # RASTER FALLBACK — render scanned page as positioned image
     # ================================================================
     def self.import_page_as_raster(model, pdf_path, page_num, media_box, opts, import_start)
-      exe = SvgTextRenderer.find_pdftocairo rescue nil
+      exe = safe_find_pdftocairo
       return false unless exe
 
       dpi = opts[:raster_dpi] || 300
@@ -408,14 +422,18 @@ module BlueCollarSystems
           img = model.active_entities.add_image(actual_png, pt, img_w, img_h)
           if img
             layer = model.layers['PDF Import'] || model.layers.add('PDF Import')
-            img.layer = layer rescue nil
+            begin
+              img.layer = layer if layer
+            rescue StandardError => e
+              Logger.warn("Raster", "Image layer assignment failed: #{e.message}")
+            end
             Sketchup.status_text = "PDF Import — Page #{page_num} — Raster image placed at #{dpi} DPI [#{(Time.now - import_start).round(1)}s]"
             return true
           end
-        rescue => e
+        rescue StandardError => e
           Logger.warn("Raster", "add_image failed: #{e.message}")
         end
-      rescue => e
+      rescue StandardError => e
         Logger.warn("Raster", "Failed: #{e.message}")
       ensure
         begin
@@ -442,8 +460,8 @@ module BlueCollarSystems
         unless stats
           UI.messagebox("No vector content found in PDF.")
         end
-      rescue => e
-        model.abort_operation rescue nil
+      rescue StandardError => e
+        safe_abort_operation(model, "Import")
         UI.messagebox("Error:\n#{e.message}\n\n#{e.backtrace.first(5).join("\n")}")
       end
     end
@@ -463,7 +481,7 @@ module BlueCollarSystems
         begin
           opts = ImportDialog.send(:build_opts, preset.merge(pages: 'All'))
           ok += 1 if run_pipeline(model, pdf, opts)
-        rescue => e
+        rescue StandardError => e
           fail_c += 1; Logger.error("Batch", File.basename(pdf), e)
         end
       end
@@ -525,7 +543,7 @@ module BlueCollarSystems
 
       begin
         Sketchup.register_importer(PDFFileImporter.new)
-      rescue => e
+      rescue StandardError => e
         puts "PDF importer registration: #{e.message}" if $VERBOSE
       end
 
@@ -548,8 +566,8 @@ module BlueCollarSystems
         return Sketchup::Importer::ImportFail unless model
         stats = BlueCollarSystems::PDFVectorImporter.run_pipeline(model, file_path, opts)
         stats ? Sketchup::Importer::ImportSuccess : Sketchup::Importer::ImportFail
-      rescue => e
-        model.abort_operation rescue nil
+      rescue StandardError => e
+        BlueCollarSystems::PDFVectorImporter.safe_abort_operation(model, "PDFFileImporter")
         Logger.error("PDFFileImporter", "load_file failed", e)
         Sketchup::Importer::ImportFail
       end

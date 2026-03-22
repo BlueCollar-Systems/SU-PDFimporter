@@ -143,6 +143,35 @@ else
 end
 
 puts
+# ----------------------------------------------------------------
+# 4. Guardrail: no bare/silent rescue patterns in core extension
+# ----------------------------------------------------------------
+puts "--- Check 4: no bare/silent rescue patterns in core extension ---"
+core_rb_files = Dir.glob(File.join(SOURCE_DIR, '**', '*.rb'))
+forbidden_rescue_hits = []
+
+core_rb_files.each do |f|
+  rel = f.sub("#{REPO_ROOT}/", '').sub("#{REPO_ROOT}\\", '')
+  File.readlines(f, chomp: true).each_with_index do |line, idx|
+    if line.match?(/\brescue\s+nil\b/) || line.match?(/\brescue\s*=>/)
+      forbidden_rescue_hits << "#{rel}:#{idx + 1}: #{line.strip}"
+    end
+  end
+end
+
+if forbidden_rescue_hits.empty?
+  puts "  PASS: no 'rescue nil' / bare 'rescue => e' patterns found"
+  pass_count += 1
+else
+  failures << "Forbidden rescue patterns found in core extension (#{forbidden_rescue_hits.length} hit(s))."
+  puts "  FAIL: found forbidden rescue patterns:"
+  forbidden_rescue_hits.first(20).each { |hit| puts "        #{hit}" }
+  if forbidden_rescue_hits.length > 20
+    puts "        ...and #{forbidden_rescue_hits.length - 20} more"
+  end
+end
+
+puts
 puts "=" * 60
 if failures.empty?
   puts "ALL CHECKS PASSED (#{pass_count} checks)"

@@ -337,7 +337,8 @@ module BlueCollarSystems
         end
 
         # Parse trailer
-        trailer_text = chunk[chunk.index('trailer')..-1] rescue nil
+        trailer_idx = chunk.index('trailer')
+        trailer_text = trailer_idx ? chunk[trailer_idx..-1] : nil
         if trailer_text
           @trailer ||= parse_trailer_dict(trailer_text)
           # Follow /Prev for incremental updates
