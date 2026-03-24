@@ -324,7 +324,11 @@ module BlueCollarSystems
       model.commit_operation
 
       # Release the raw PDF buffer and object cache to free memory.
-      parser.release rescue nil
+      begin
+        parser.release
+      rescue StandardError => e
+        Logger.warn("Pipeline", "parser.release failed: #{e.message}")
+      end
 
       elapsed = (Time.now - import_start).round(1)
       Sketchup.status_text = "PDF Import complete — #{stats[:edges]} edges, #{stats[:text]} text items — #{elapsed}s"

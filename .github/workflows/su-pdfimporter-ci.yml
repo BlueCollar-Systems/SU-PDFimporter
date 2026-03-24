@@ -22,5 +22,10 @@ jobs:
           ruby-version: "3.2"
           bundler-cache: false
 
+      - name: Ruby syntax check
+        run: |
+          set -e
+          find extracted test -type f -name "*.rb" -print0 | xargs -0 -n1 ruby -c
+
       - name: Run smoke test
         run: ruby test/smoke_test.rb
