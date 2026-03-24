@@ -25,7 +25,8 @@ module BlueCollarSystems
         page_w = (media_box[2] - media_box[0]) * PDF_PT_TO_INCH * scale
         page_h = (media_box[3] - media_box[1]) * PDF_PT_TO_INCH * scale
 
-        IDGen.reset
+        # NOTE: Do NOT reset IDGen here — IDs must be unique across all pages
+        # in a multi-page import. IDGen.reset is called once in run_pipeline.
 
         primitives = []
         paths.each do |path|

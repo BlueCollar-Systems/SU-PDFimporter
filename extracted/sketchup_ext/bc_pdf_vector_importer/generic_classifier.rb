@@ -91,12 +91,9 @@ module BlueCollarSystems
             p_tags << :thin_line
           end
 
-          # Store tags (using a simple approach since Primitive is a Struct)
-          # We'll use the layer_name field to store generic tags as a prefix
-          # until we add a proper tags field
-          existing = p.layer_name || ""
-          tag_str = p_tags.map(&:to_s).join(",")
-          p.layer_name = tag_str.empty? ? existing : "#{existing}|#{tag_str}"
+          # Store tags in the dedicated tags field
+          existing = p.tags || []
+          p.tags = existing + p_tags
         end
       end
 

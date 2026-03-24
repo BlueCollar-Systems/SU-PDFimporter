@@ -58,7 +58,8 @@ module BlueCollarSystems
       :layer_name,      # String or nil — OCG layer
       :closed,          # Boolean
       :area,            # Float or nil — enclosed area for closed loops
-      :page_number      # Integer
+      :page_number,     # Integer
+      :tags             # Array of Symbols or nil — classification tags
     )
 
     # ── TextItem (normalized) ───────────────────────────────────────

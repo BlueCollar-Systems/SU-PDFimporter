@@ -211,12 +211,15 @@ module BlueCollarSystems
         end
       end
 
-      def find_inherited(dict, key)
+      MAX_INHERIT_DEPTH = 32
+
+      def find_inherited(dict, key, depth = 0)
         return dict[key] if dict[key]
+        return nil if depth >= MAX_INHERIT_DEPTH
         if dict['/Parent']
           parent = @pdf.resolve_object(dict['/Parent'])
           parent_dict = to_dict(parent)
-          return find_inherited(parent_dict, key) if parent_dict
+          return find_inherited(parent_dict, key, depth + 1) if parent_dict
         end
         nil
       end

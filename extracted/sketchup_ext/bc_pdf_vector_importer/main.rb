@@ -133,6 +133,9 @@ module BlueCollarSystems
 
       model.start_operation("Import PDF Vectors", true)
 
+      # Reset ID counter once at the start of a multi-page import
+      IDGen.reset
+
       ocg.layer_list.each do |n|
         t = "PDF::Layer::#{n}"
         model.layers.add(t) unless model.layers[t]

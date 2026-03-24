@@ -9,7 +9,7 @@ module BlueCollarSystems
   module PDFVectorImporter
     class PDFParser
 
-      attr_reader :page_count
+      attr_reader :page_count, :pages
 
       def initialize(filepath)
         @filepath = filepath
@@ -26,7 +26,15 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Top-level parse
       # ---------------------------------------------------------------
+      MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+
       def parse
+        file_size = File.size(@filepath)
+        if file_size > MAX_FILE_SIZE
+          raise "PDF file too large (#{(file_size / 1024.0 / 1024.0).round(1)} MB). " \
+                "Maximum supported size is #{MAX_FILE_SIZE / 1024 / 1024} MB."
+        end
+
         @data = File.binread(@filepath)
 
         # Validate PDF header
@@ -905,9 +913,9 @@ module BlueCollarSystems
             depth = 1
             j = i + 1
             while j < len && depth > 0
-              if text[j] == '(' && text[j-1] != '\\'
+              if text[j] == '(' && (j == 0 || text[j-1] != '\\')
                 depth += 1
-              elsif text[j] == ')' && text[j-1] != '\\'
+              elsif text[j] == ')' && (j == 0 || text[j-1] != '\\')
                 depth -= 1
               end
               j += 1
