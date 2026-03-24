@@ -248,6 +248,28 @@ module BlueCollarSystems
             j += 1
           end
           word = stream[i...j]
+
+          # Inline image: BI <key-value pairs> ID <binary data> EI
+          # When we see 'BI', skip forward past the binary data to 'EI'.
+          if word == 'BI'
+            # Find 'ID' marker (signals start of binary image data)
+            id_pos = stream.index(/\sID[\s\n\r]/, j)
+            if id_pos
+              # Find 'EI' marker after the binary data.
+              # EI must be preceded by whitespace to avoid false matches
+              # inside the binary data.
+              ei_pos = stream.index(/[\s\n\r]EI(?=[\s\n\r\/\[<])/, id_pos + 3)
+              if ei_pos
+                i = ei_pos + 3  # skip past 'EI'
+              else
+                i = len  # malformed — skip to end
+              end
+            else
+              i = j  # no ID found — just skip the BI token
+            end
+            next
+          end
+
           if word =~ /\A[+-]?\d*\.?\d+\z/
             tokens << { type: :number, value: word.to_f }
           else

@@ -41,6 +41,17 @@ module BlueCollarSystems
       end
 
       # ---------------------------------------------------------------
+      # Release the raw file buffer and object cache to free memory.
+      # Call this after all pages have been processed.
+      # ---------------------------------------------------------------
+      def release
+        @data = nil
+        @objects = {}
+        @font_map_cache = {}
+        @ocg_map_cache = {}
+      end
+
+      # ---------------------------------------------------------------
       # Return data for a given 1-based page number
       # ---------------------------------------------------------------
       def page_data(page_num)
@@ -442,7 +453,10 @@ module BlueCollarSystems
         collect_pages(pages_ref)
       end
 
-      def collect_pages(ref)
+      MAX_PAGE_TREE_DEPTH = 64
+
+      def collect_pages(ref, depth = 0)
+        return if depth > MAX_PAGE_TREE_DEPTH  # guard against circular refs
         obj = resolve_object(ref)
         dict = to_dict(obj)
         return unless dict
@@ -453,7 +467,7 @@ module BlueCollarSystems
         elsif type == '/Pages'
           kids = dict['/Kids']
           if kids.is_a?(Array)
-            kids.each { |kid_ref| collect_pages(kid_ref) }
+            kids.each { |kid_ref| collect_pages(kid_ref, depth + 1) }
           end
         end
       end
@@ -461,12 +475,13 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Inherited attributes (MediaBox, CropBox, etc.)
       # ---------------------------------------------------------------
-      def find_inherited(dict, key)
+      def find_inherited(dict, key, depth = 0)
+        return nil if depth > MAX_PAGE_TREE_DEPTH  # guard against circular refs
         return dict[key] if dict[key]
         if dict['/Parent']
           parent = resolve_object(dict['/Parent'])
           parent_dict = to_dict(parent)
-          return find_inherited(parent_dict, key) if parent_dict
+          return find_inherited(parent_dict, key, depth + 1) if parent_dict
         end
         nil
       end

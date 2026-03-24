@@ -381,9 +381,9 @@ module BlueCollarSystems
 
         def valid_fraction(num, den)
           return nil if num <= 0 || den <= 0
-          den = 16 if den == 6 || den == 1
           valid = [2, 4, 8, 16, 32, 64]
           return nil unless valid.include?(den)
+          return nil if num >= den  # e.g. 8/8 is not a valid fraction display
           "#{num}/#{den}"
         end
 

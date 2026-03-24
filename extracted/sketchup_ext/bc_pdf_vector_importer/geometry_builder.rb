@@ -305,12 +305,31 @@ module BlueCollarSystems
       # Draw simple edges (no arc detection)
       # ---------------------------------------------------------------
       def draw_edges(entities, points, layer, dash_layer, dash_spec, closed)
-        (0...points.length - 1).each do |i|
-          safe_add_line(entities, points[i], points[i + 1], layer, dash_layer, dash_spec)
+        # Filter out zero-length segments, then batch-add for performance.
+        valid_pts = [points.first]
+        (1...points.length).each do |i|
+          valid_pts << points[i] if points[i].distance(valid_pts.last) >= @merge_tol
+        end
+        if closed && valid_pts.length >= 3 && valid_pts.first.distance(valid_pts.last) >= @merge_tol
+          valid_pts << valid_pts.first
         end
 
-        if closed && points.length >= 3 && points.first.distance(points.last) > @merge_tol
-          safe_add_line(entities, points.last, points.first, layer, dash_layer, dash_spec)
+        return if valid_pts.length < 2
+
+        target = dash_layer ? get_or_create_layer(dash_layer) : layer
+
+        begin
+          edges = entities.add_edges(valid_pts)
+          if edges && !edges.empty?
+            edges.each { |e| set_layer(e, target) }
+            @edge_count += edges.length
+          end
+        rescue StandardError => e
+          # Fallback to individual lines if batch fails
+          Logger.warn("GeometryBuilder", "add_edges batch failed, falling back: #{e.message}")
+          (0...valid_pts.length - 1).each do |i|
+            safe_add_line(entities, valid_pts[i], valid_pts[i + 1], layer, dash_layer, dash_spec)
+          end
         end
       end
 

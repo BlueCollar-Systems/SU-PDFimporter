@@ -409,45 +409,69 @@ module BlueCollarSystems
         end
 
         # ── Pass 3: General overlap — keep the more informative item ──
-        # But never drop a digit adjacent to a fraction
-        items.each_with_index do |a, i|
-          next if drop[i]
-          ab = bboxes[i]
+        # Uses a spatial grid for O(n) average performance instead of O(n^2).
+        # But never drop a digit adjacent to a fraction.
+        overlap_cell = 30.0  # grid cell size in PDF points
+        grid = {}
+        items.each_with_index do |_item, idx|
+          next if drop[idx]
+          bb = bboxes[idx]
+          cx0 = (bb[0] / overlap_cell).floor
+          cy0 = (bb[1] / overlap_cell).floor
+          cx1 = (bb[2] / overlap_cell).floor
+          cy1 = (bb[3] / overlap_cell).floor
+          (cx0..cx1).each do |cx|
+            (cy0..cy1).each do |cy|
+              key = (cx << 16) | (cy & 0xFFFF)
+              (grid[key] ||= []) << idx
+            end
+          end
+        end
 
-          items.each_with_index do |b, j|
-            next if j <= i || drop[j]
-            bb = bboxes[j]
+        checked = {}
+        grid.each_value do |cell_indices|
+          cell_indices.each do |i|
+            next if drop[i]
+            ab = bboxes[i]
+            a = items[i]
 
-            # Quick reject
-            next if ab[2] < bb[0] || bb[2] < ab[0] ||
-                    ab[3] < bb[1] || bb[3] < ab[1]
+            cell_indices.each do |j|
+              next if j <= i || drop[j]
+              pair = (i << 20) | j
+              next if checked[pair]
+              checked[pair] = true
 
-            ox = [0, [ab[2], bb[2]].min - [ab[0], bb[0]].max].max
-            oy = [0, [ab[3], bb[3]].min - [ab[1], bb[1]].max].max
-            overlap = ox * oy
-            area_a = [(ab[2] - ab[0]) * (ab[3] - ab[1]), 0.001].max
-            area_b = [(bb[2] - bb[0]) * (bb[3] - bb[1]), 0.001].max
-            min_area = [area_a, area_b].min
+              bb = bboxes[j]
+              b = items[j]
 
-            next unless (overlap / min_area) > 0.30
+              next if ab[2] < bb[0] || bb[2] < ab[0] ||
+                      ab[3] < bb[1] || bb[3] < ab[1]
 
-            # Never drop a digit when the other item is a fraction —
-            # they form a compound dimension like "3 15/16"
-            a_is_digit = a.text.to_s =~ /\A\d{1,2}\z/
-            b_is_digit = b.text.to_s =~ /\A\d{1,2}\z/
-            a_is_frac = a.text.to_s =~ /\d+\/\d+/
-            b_is_frac = b.text.to_s =~ /\d+\/\d+/
-            next if (a_is_digit && b_is_frac) || (b_is_digit && a_is_frac)
+              ox = [0, [ab[2], bb[2]].min - [ab[0], bb[0]].max].max
+              oy = [0, [ab[3], bb[3]].min - [ab[1], bb[1]].max].max
+              overlap = ox * oy
+              area_a = [(ab[2] - ab[0]) * (ab[3] - ab[1]), 0.001].max
+              area_b = [(bb[2] - bb[0]) * (bb[3] - bb[1]), 0.001].max
+              min_area = [area_a, area_b].min
 
-            score_a = a.text.to_s.length + (a.text =~ /[A-Za-z]/ ? 5 : 0) +
-                       (a.text =~ /\d+\/\d+/ ? 3 : 0)
-            score_b = b.text.to_s.length + (b.text =~ /[A-Za-z]/ ? 5 : 0) +
-                       (b.text =~ /\d+\/\d+/ ? 3 : 0)
-            if score_a >= score_b
-              drop[j] = true
-            else
-              drop[i] = true
-              break
+              next unless (overlap / min_area) > 0.30
+
+              a_is_digit = a.text.to_s =~ /\A\d{1,2}\z/
+              b_is_digit = b.text.to_s =~ /\A\d{1,2}\z/
+              a_is_frac = a.text.to_s =~ /\d+\/\d+/
+              b_is_frac = b.text.to_s =~ /\d+\/\d+/
+              next if (a_is_digit && b_is_frac) || (b_is_digit && a_is_frac)
+
+              score_a = a.text.to_s.length + (a.text =~ /[A-Za-z]/ ? 5 : 0) +
+                         (a.text =~ /\d+\/\d+/ ? 3 : 0)
+              score_b = b.text.to_s.length + (b.text =~ /[A-Za-z]/ ? 5 : 0) +
+                         (b.text =~ /\d+\/\d+/ ? 3 : 0)
+              if score_a >= score_b
+                drop[j] = true
+              else
+                drop[i] = true
+                break
+              end
             end
           end
         end
@@ -495,7 +519,7 @@ module BlueCollarSystems
         items.each_with_index { |it, i| result << it unless drop[i] }
         result
       rescue StandardError => e
-        Logger.warn("TextParser", "remove_duplicate_section_headers failed: #{e.message}")
+        Logger.warn("TextParser", "suppress_overlaps failed: #{e.message}")
         items
       end
 
