@@ -1,6 +1,6 @@
 # bc_pdf_vector_importer.rb
 # Root loader for the PDF Vector Importer SketchUp Extension
-# Compatible with SketchUp 2017 Make (Ruby 2.2) through current Pro versions.
+# CI-tested with SketchUp 2021+ (Ruby 2.7+). Older versions may work but are untested.
 #
 # Copyright 2024-2026 BlueCollar Systems
 # License: MIT
@@ -26,7 +26,7 @@ module BlueCollarSystems
                             'Features arc reconstruction, color-based tag grouping, ' \
                             'text import, dash patterns, Scale by Reference tool, ' \
                             'scanned-page detection warnings, and full Bezier support. ' \
-                            'Compatible: SketchUp 2017 Make through current Pro.'
+                            'CI-tested: SketchUp 2021+ (Ruby 2.7+). Older versions may work.'
     extension.version     = PLUGIN_VERSION
     extension.copyright   = '2024-2026 BlueCollar Systems'
 

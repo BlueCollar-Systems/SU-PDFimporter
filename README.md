@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-3.5.0-green.svg)]()
-[![Platform](https://img.shields.io/badge/Platform-SketchUp%202017--Current-orange.svg)]()
-[![Ruby](https://img.shields.io/badge/Ruby-2.2%2B-red.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-SketchUp%202021%2B%20(CI%20tested)-orange.svg)]()
+[![Ruby](https://img.shields.io/badge/Ruby-2.7%2B%20(CI%20tested)-red.svg)]()
 
 Import PDF vector geometry as native editable SketchUp edges with arc reconstruction, color-based tag grouping, text import, dash patterns, Scale by Reference tool, and full Bezier support. Pure-Ruby PDF parser -- no external dependencies.
 
@@ -13,7 +13,7 @@ Import PDF vector geometry as native editable SketchUp edges with arc reconstruc
 
 ## Overview
 
-PDF Vector Importer parses PDF content streams directly in Ruby and reconstructs vector geometry as native SketchUp edges. No gems, no external binaries, no C extensions. It runs on every platform SketchUp supports, from 2017 Make (Ruby 2.2) through the current Pro release.
+PDF Vector Importer parses PDF content streams directly in Ruby and reconstructs vector geometry as native SketchUp edges. No gems, no external binaries, no C extensions. It runs on every platform SketchUp supports, from SketchUp 2020 (Ruby 2.7) through the current Pro release. Older versions (2017–2019, Ruby 2.2–2.5) may work but are not CI-tested.
 
 The importer profiles each PDF document to identify its origin (fabrication drawings, CAD exports, architectural plans, vector art, or raster scans) and adapts its import strategy accordingly.
 
@@ -175,11 +175,10 @@ bc_pdf_vector_importer/
 
 | SketchUp Version | Ruby Version | Status |
 |------------------|-------------|--------|
-| 2017 Make | 2.2 | Supported |
-| 2017-2019 Pro | 2.2 | Supported |
-| 2020 | 2.5 | Supported |
-| 2021-2023 | 2.7 | Supported |
-| 2024+ | 3.2+ | Supported |
+| 2017–2019 | 2.2–2.5 | May work, not CI-tested |
+| 2020 | 2.5 | May work, not CI-tested |
+| 2021–2023 | 2.7 | CI-tested |
+| 2024+ | 3.2+ | CI-tested |
 
 ---
 
