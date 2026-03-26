@@ -97,6 +97,21 @@ module BlueCollarSystems
         end
       end
 
+      # ── File size warning for very large PDFs ──
+      begin
+        file_size_bytes = File.size(path)
+        if file_size_bytes > 100 * 1024 * 1024
+          size_mb = (file_size_bytes / (1024.0 * 1024.0)).round(1)
+          choice = UI.messagebox(
+            "This PDF is very large (#{size_mb} MB). Import may take a significant " \
+            "amount of time and use considerable memory. Continue?",
+            MB_OKCANCEL)
+          return nil unless choice == IDOK
+        end
+      rescue StandardError => e
+        Logger.warn("Pipeline", "File size check failed: #{e.message}")
+      end
+
       parser = PDFParser.new(path)
       parser.parse
       if parser.page_count == 0
@@ -149,6 +164,7 @@ module BlueCollarSystems
       import_start = Time.now
 
       pages.each_with_index do |page_num, idx|
+       begin
         pct = pages.length > 1 ? " (#{((idx.to_f / pages.length) * 100).round}%)" : ""
         elapsed = (Time.now - import_start).round(1)
 
@@ -322,6 +338,12 @@ module BlueCollarSystems
             merge_tolerance: opts[:merge_tolerance], min_edge_length: opts[:merge_tolerance])
           cl.each { |k, v| stats[:cleanup][k] = (stats[:cleanup][k] || 0) + v }
         end
+
+       rescue => e
+        safe_abort_operation(model, "Pipeline:Page#{page_num}")
+        Logger.error("Pipeline", "Page #{page_num} failed: #{e.message}", e)
+        raise
+       end
       end
 
       model.commit_operation
@@ -477,6 +499,43 @@ module BlueCollarSystems
       end
     end
 
+    def self.import_pdf_safe
+      model = Sketchup.active_model
+      return UI.messagebox("No active model.") unless model
+      path = UI.openpanel("Select PDF File (Safe Mode)", "", "PDF Files|*.pdf||")
+      return unless path && File.exist?(path)
+
+      begin
+        fast = ImportDialog::PRESETS['Fast'] || {}
+        opts = ImportDialog.send(:build_opts, fast.merge(pages: 'All'))
+        stats = run_pipeline(model, path, opts)
+        unless stats
+          UI.messagebox("No vector content found in PDF.")
+        end
+      rescue StandardError => e
+        safe_abort_operation(model, "ImportSafe")
+        UI.messagebox("Safe mode import error:\n#{e.message}\n\n#{e.backtrace.first(5).join("\n")}")
+      end
+    end
+
+    def self.import_dxf
+      model = Sketchup.active_model
+      return UI.messagebox("No active model.") unless model
+      path = UI.openpanel("Select DXF File", "", "DXF Files|*.dxf;*.DXF||")
+      return unless path && File.exist?(path)
+
+      begin
+        ok = model.import(path)
+        unless ok
+          UI.messagebox(
+            "DXF import failed.\n\n" \
+            "Verify SketchUp import support/options for DXF on this installation.")
+        end
+      rescue StandardError => e
+        UI.messagebox("DXF import error:\n#{e.message}")
+      end
+    end
+
     def self.batch_import
       model = Sketchup.active_model
       return UI.messagebox("No active model.") unless model
@@ -526,9 +585,13 @@ module BlueCollarSystems
     # ================================================================
     unless @loaded
       UI.menu('File').add_item('Import PDF Vectors...') { self.import_pdf }
+      UI.menu('File').add_item('Import PDF Vectors (Safe Mode)...') { self.import_pdf_safe }
+      UI.menu('File').add_item('Import DXF (Native)...') { self.import_dxf }
 
       sub = UI.menu('Extensions').add_submenu('PDF Vector Importer')
       sub.add_item('Import PDF...') { self.import_pdf }
+      sub.add_item('Import PDF (Safe Mode)...') { self.import_pdf_safe }
+      sub.add_item('Import DXF (Native)...') { self.import_dxf }
       sub.add_item('Batch Import Folder...') { self.batch_import }
       sub.add_separator
       sub.add_item('Scale to Real Dimensions...') { self.scale_by_reference }
@@ -544,6 +607,8 @@ module BlueCollarSystems
 
       tb = UI::Toolbar.new("PDF Vector Importer")
       [["Import PDF", method(:import_pdf), "Import a PDF drawing"],
+       ["Safe PDF", method(:import_pdf_safe), "Import PDF using conservative fast settings"],
+       ["Import DXF", method(:import_dxf), "Import a DXF using SketchUp's native importer"],
        ["Scale", method(:scale_by_reference), "Scale to real dimensions"]
       ].each do |label, action, tip|
         cmd = UI::Command.new(label) { action.call }

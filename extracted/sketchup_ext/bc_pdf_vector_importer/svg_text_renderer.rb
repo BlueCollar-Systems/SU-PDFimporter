@@ -223,6 +223,52 @@ module BlueCollarSystems
               cx, cy = x, y
               current << mk.call(cx, cy)
             end
+          when '_RM'  # relative moveto
+            while nums.length >= 2
+              subpaths << current if current.length >= 2
+              cx += nums.shift; cy += nums.shift
+              start_pt = mk.call(cx, cy)
+              current = [start_pt]
+            end
+          when '_RL'  # relative lineto
+            while nums.length >= 2
+              cx += nums.shift; cy += nums.shift
+              current << mk.call(cx, cy)
+            end
+          when '_RH'  # relative horizontal lineto
+            while nums.length >= 1
+              cx += nums.shift
+              current << mk.call(cx, cy)
+            end
+          when '_RV'  # relative vertical lineto
+            while nums.length >= 1
+              cy += nums.shift
+              current << mk.call(cx, cy)
+            end
+          when '_RC'  # relative curveto
+            while nums.length >= 6
+              dx1, dy1, dx2, dy2, dx, dy = nums.shift(6)
+              x1 = cx + dx1; y1 = cy + dy1
+              x2 = cx + dx2; y2 = cy + dy2
+              x = cx + dx;   y = cy + dy
+              p0 = current.last || mk.call(cx, cy)
+              p1 = mk.call(x1, y1); p2 = mk.call(x2, y2); p3 = mk.call(x, y)
+              ch = p0.distance(p3)
+              n = ch < 0.02 ? 2 : (ch < 0.08 ? 3 : 4)
+              (1..n).each do |i|
+                t = i.to_f / n; mt = 1.0 - t
+                bx = mt**3*p0.x + 3*mt**2*t*p1.x + 3*mt*t**2*p2.x + t**3*p3.x
+                by = mt**3*p0.y + 3*mt**2*t*p1.y + 3*mt*t**2*p2.y + t**3*p3.y
+                current << Geom::Point3d.new(bx, by, 0.0)
+              end
+              cx, cy = x, y
+            end
+          when '_RS'  # relative smooth curveto
+            while nums.length >= 4
+              _, _, dx, dy = nums.shift(4)
+              cx += dx; cy += dy
+              current << mk.call(cx, cy)
+            end
           when 'Z'
             if current.last && start_pt && current.last.distance(start_pt) >= 0.0003
               current << start_pt
@@ -235,7 +281,23 @@ module BlueCollarSystems
         tokens.each do |tok|
           if tok =~ /\A[A-Za-z]\z/
             run.call if cmd
+            is_relative = (tok =~ /[a-z]/) ? true : false
             cmd = tok.upcase
+            # For relative commands, convert coordinates to absolute before processing
+            if is_relative && cmd == 'M'
+              cmd = '_RM'  # relative move marker
+            elsif is_relative && cmd == 'L'
+              cmd = '_RL'
+            elsif is_relative && cmd == 'H'
+              cmd = '_RH'
+            elsif is_relative && cmd == 'V'
+              cmd = '_RV'
+            elsif is_relative && cmd == 'C'
+              cmd = '_RC'
+            elsif is_relative && cmd == 'S'
+              cmd = '_RS'
+            end
+            # Z/z behave identically
             nums = []
           else
             nums << tok.to_f

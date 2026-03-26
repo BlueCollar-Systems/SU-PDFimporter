@@ -33,6 +33,8 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 - **Raster fallback** for scanned pages
 - **Import quality assessment** with warnings and performance metrics
 - **Post-import action workflow** (geometry only, scale, cleanup, feature inventory)
+- **Safe Mode import command** (Fast preset) for very dense/problem PDFs
+- **Native DXF bridge command** from the extension menu/toolbar
 - **Tag visibility controls** for PDF layers
 - **Document profiling** (fabrication, CAD, architectural, vector art, raster)
 - **FlateDecode decompression** for compressed PDF streams
@@ -48,6 +50,9 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 4. Restart SketchUp if prompted
 
 The extension registers under **File > Import** and adds a PDF Vector Importer toolbar.
+
+For SketchUp 2025 users: native PDF import discoverability changed in SketchUp UI,
+but this extension still provides dedicated PDF import menu and toolbar commands.
 
 ---
 

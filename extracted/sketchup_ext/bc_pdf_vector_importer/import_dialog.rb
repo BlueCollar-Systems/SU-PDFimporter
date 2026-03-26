@@ -443,7 +443,7 @@ module BlueCollarSystems
         scale = 1.0 if scale <= 0
         case (raw[:units] || '')
         when /Feet/i   then scale *= 12.0
-        when /Points/i then scale *= 72.0
+        when /Points/i then scale /= 72.0
         end
 
         pages_str = (raw[:pages] || 'All').strip

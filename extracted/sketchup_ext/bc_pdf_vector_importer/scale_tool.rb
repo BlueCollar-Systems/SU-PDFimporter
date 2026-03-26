@@ -81,6 +81,15 @@ module BlueCollarSystems
             return
           end
 
+          if factor > 10000 || factor < 0.0001
+            warn_choice = UI.messagebox(
+              "Scale factor %.6f is extremely %s.\n\n" \
+              "This may indicate a unit mismatch. Continue anyway?" %
+              [factor, factor > 10000 ? "large" : "small"],
+              MB_YESNO)
+            return unless warn_choice == IDYES
+          end
+
           apply_scale(model, factor, scale_target, measured_length, real_inches, real_dim_str)
 
         else
@@ -113,6 +122,16 @@ module BlueCollarSystems
           end
 
           factor = real_inches / measured_inches
+
+          if factor > 10000 || factor < 0.0001
+            warn_choice = UI.messagebox(
+              "Scale factor %.6f is extremely %s.\n\n" \
+              "This may indicate a unit mismatch. Continue anyway?" %
+              [factor, factor > 10000 ? "large" : "small"],
+              MB_YESNO)
+            return unless warn_choice == IDYES
+          end
+
           apply_scale(model, factor, scale_target, measured_inches, real_inches, real_dim_str)
         end
       end
@@ -146,6 +165,15 @@ module BlueCollarSystems
           UI.messagebox("Could not parse scale factor: \"#{factor_str}\"\n\n" \
                         "Examples: 2.0, 1:50, 48, 0.5")
           return
+        end
+
+        if factor > 10000 || factor < 0.0001
+          warn_choice = UI.messagebox(
+            "Scale factor %.6f is extremely %s.\n\n" \
+            "This may indicate a unit mismatch. Continue anyway?" %
+            [factor, factor > 10000 ? "large" : "small"],
+            MB_YESNO)
+          return unless warn_choice == IDYES
         end
 
         apply_scale(model, factor, scale_target, nil, nil, factor_str)
@@ -194,6 +222,11 @@ module BlueCollarSystems
             # We're inside a group/component — scale its parent
             path = model.active_path
             if path && path.last
+              if path.last.respond_to?(:locked?) && path.last.locked?
+                UI.messagebox("The active group/component is locked and cannot be scaled.")
+                model.abort_operation
+                return
+              end
               path.last.transform!(xform)
               scaled_count = 1
             end

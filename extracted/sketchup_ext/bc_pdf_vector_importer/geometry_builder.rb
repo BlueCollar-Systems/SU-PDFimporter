@@ -485,9 +485,9 @@ module BlueCollarSystems
       def get_color_group(parent_entities, rgb)
         return parent_entities unless @group_by_color
 
-        r = (rgb[0] * 255).to_i
-        g = (rgb[1] * 255).to_i
-        b = (rgb[2] * 255).to_i
+        r = [[rgb[0] * 255, 0].max, 255].min.to_i
+        g = [[rgb[1] * 255, 0].max, 255].min.to_i
+        b = [[rgb[2] * 255, 0].max, 255].min.to_i
         key = "#{r}_#{g}_#{b}"
 
         unless @color_groups[key]
