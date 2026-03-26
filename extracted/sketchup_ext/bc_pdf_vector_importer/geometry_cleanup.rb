@@ -18,6 +18,14 @@ module BlueCollarSystems
       # Returns a stats hash.
       # ---------------------------------------------------------------
       def self.cleanup(entities, opts = {})
+        # Resolve cleanup_level preset if provided (Phase 2)
+        if opts[:cleanup_level] && defined?(ImportConfig)
+          preset = ImportConfig::CLEANUP_PRESETS[opts[:cleanup_level].to_s]
+          if preset
+            opts = preset.merge(opts) { |_k, preset_v, user_v| user_v }
+          end
+        end
+
         merge_tol     = opts[:merge_tolerance] || 0.005   # inches
         collinear_tol = opts[:collinear_tolerance] || 0.001
         micro_len     = opts[:min_edge_length] || 0.002   # inches

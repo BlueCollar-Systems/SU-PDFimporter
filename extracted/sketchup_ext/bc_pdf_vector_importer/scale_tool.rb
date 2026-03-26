@@ -178,8 +178,9 @@ module BlueCollarSystems
 
         case target_mode
         when "Selection Only"
-          # Scale each selected entity
+          # Scale each selected entity (skip locked)
           model.selection.each do |ent|
+            next if ent.respond_to?(:locked?) && ent.locked?
             if ent.respond_to?(:transform!)
               ent.transform!(xform)
               scaled_count += 1
@@ -203,8 +204,13 @@ module BlueCollarSystems
           end
 
         else  # "All Groups" — scale everything at the top level
+          locked_count = 0
           model.entities.each do |ent|
             if ent.is_a?(Sketchup::Group) || ent.is_a?(Sketchup::ComponentInstance)
+              if ent.respond_to?(:locked?) && ent.locked?
+                locked_count += 1
+                next
+              end
               ent.transform!(xform)
               scaled_count += 1
             end
@@ -212,6 +218,7 @@ module BlueCollarSystems
           # If no groups found, scale all edges/faces
           if scaled_count == 0
             model.entities.each do |ent|
+              next if ent.respond_to?(:locked?) && ent.locked?
               if ent.respond_to?(:transform!)
                 ent.transform!(xform)
                 scaled_count += 1

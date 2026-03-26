@@ -527,7 +527,7 @@ module BlueCollarSystems
     unless @loaded
       UI.menu('File').add_item('Import PDF Vectors...') { self.import_pdf }
 
-      sub = UI.menu('Plugins').add_submenu('PDF Vector Importer')
+      sub = UI.menu('Extensions').add_submenu('PDF Vector Importer')
       sub.add_item('Import PDF...') { self.import_pdf }
       sub.add_item('Batch Import Folder...') { self.batch_import }
       sub.add_separator
