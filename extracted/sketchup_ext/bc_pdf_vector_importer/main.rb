@@ -11,6 +11,7 @@ module BlueCollarSystems
 
     dir = File.dirname(__FILE__)
     # Core Engine
+    require File.join(dir, 'import_config')
     require File.join(dir, 'primitives')
     require File.join(dir, 'logger')
     require File.join(dir, 'pdf_parser')
@@ -335,15 +336,17 @@ module BlueCollarSystems
         if opts[:cleanup_geometry] && builder.page_group
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Cleaning up geometry... [#{(Time.now - import_start).round(1)}s]"
           cl = GeometryCleanup.cleanup(builder.page_group.entities,
-            merge_tolerance: opts[:merge_tolerance], min_edge_length: opts[:merge_tolerance])
+            merge_tolerance:    opts[:merge_tolerance],
+            min_edge_length:    opts[:merge_tolerance],
+            cleanup_level:      opts[:cleanup_level])
           cl.each { |k, v| stats[:cleanup][k] = (stats[:cleanup][k] || 0) + v }
         end
 
-       rescue => e
+      rescue StandardError => e
         safe_abort_operation(model, "Pipeline:Page#{page_num}")
         Logger.error("Pipeline", "Page #{page_num} failed: #{e.message}", e)
         raise
-       end
+      end
       end
 
       model.commit_operation
@@ -521,18 +524,44 @@ module BlueCollarSystems
     def self.import_dxf
       model = Sketchup.active_model
       return UI.messagebox("No active model.") unless model
-      path = UI.openpanel("Select DXF File", "", "DXF Files|*.dxf;*.DXF||")
+      path = UI.openpanel("Select DXF/DWG File", "",
+                          "DXF/DWG Files|*.dxf;*.DXF;*.dwg;*.DWG||")
       return unless path && File.exist?(path)
 
       begin
-        ok = model.import(path)
+        # SketchUp 2017 model.import returns true/false.
+        # Some SU versions need the importer type hint.
+        ok = false
+        ext = File.extname(path).downcase
+
+        # Try with explicit importer options first (SU 2018+)
+        begin
+          if ext == '.dwg' || ext == '.dxf'
+            ok = model.import(path, false)  # false = don't show native options dialog
+          end
+        rescue ArgumentError
+          # SU 2017 import() takes only the path
+          ok = false
+        end
+
+        # Fallback: simple import
+        ok = model.import(path) unless ok
+
         unless ok
           UI.messagebox(
-            "DXF import failed.\n\n" \
-            "Verify SketchUp import support/options for DXF on this installation.")
+            "DXF/DWG import was not successful.\n\n" \
+            "Possible causes:\n" \
+            "  - DXF/DWG import may not be enabled in this SketchUp version\n" \
+            "  - The file may use features not supported by SketchUp\n\n" \
+            "Try this:\n" \
+            "  1. Go to Window > Preferences > Files\n" \
+            "  2. Verify DXF/DWG is listed under Import\n" \
+            "  3. If not listed, your SketchUp version may not support it\n\n" \
+            "Alternative: Open the DXF in a free viewer like\n" \
+            "LibreCAD and re-save, then try importing again.")
         end
       rescue StandardError => e
-        UI.messagebox("DXF import error:\n#{e.message}")
+        UI.messagebox("DXF/DWG import error:\n#{e.message}")
       end
     end
 

@@ -175,7 +175,7 @@ module BlueCollarSystems
       end
 
       # ---- HTML generators ------------------------------------------
-      DIALOG_CSS = <<~CSS.freeze
+      DIALOG_CSS = <<-CSS.freeze
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
              font-size:13px;color:#1a1a1a;background:#fff;padding:20px}
@@ -215,7 +215,7 @@ module BlueCollarSystems
           "<option value=\"#{v}\"#{sel}>#{label}</option>"
         }.join
 
-        <<~HTML
+        <<-HTML
           <!DOCTYPE html><html><head><meta charset="utf-8">
           <style>#{DIALOG_CSS}</style></head><body>
           <h2>Import PDF Vectors</h2>
@@ -285,7 +285,7 @@ module BlueCollarSystems
           "<option value=\"#{esc(v)}\"#{sel}>#{esc(v)}</option>"
         }.join
 
-        <<~HTML
+        <<-HTML
           <!DOCTYPE html><html><head><meta charset="utf-8">
           <style>#{DIALOG_CSS}body{overflow-y:auto}</style></head><body>
           <h2>Custom Import Settings</h2>
