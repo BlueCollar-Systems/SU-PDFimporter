@@ -316,6 +316,21 @@ module BlueCollarSystems
 
         return if valid_pts.length < 2
 
+        # When a dash pattern is present and the SketchUp version lacks the
+        # line_styles API (SU 2017/2018), we must draw each segment through
+        # safe_add_line → add_dashed_line to physically create the gaps.
+        # The batch add_edges path would ignore dash_spec entirely.
+        needs_physical_dashes = dash_spec &&
+          dash_spec[:pattern].is_a?(Array) && !dash_spec[:pattern].empty? &&
+          !(@model.respond_to?(:line_styles) && @model.line_styles)
+
+        if needs_physical_dashes
+          (0...valid_pts.length - 1).each do |i|
+            safe_add_line(entities, valid_pts[i], valid_pts[i + 1], layer, dash_layer, dash_spec)
+          end
+          return
+        end
+
         target = dash_layer ? get_or_create_layer(dash_layer) : layer
 
         begin
