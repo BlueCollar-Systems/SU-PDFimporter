@@ -200,8 +200,22 @@ module BlueCollarSystems
 
         model.start_operation("Scale by Reference", true)
 
-        # Build a scale transformation around the origin
-        xform = Geom::Transformation.scaling(ORIGIN, factor)
+        # Compute bounding box center of target geometry for anchored scaling.
+        # Scaling around the geometry center keeps shapes in place instead of
+        # displacing them (which happens when scaling around world origin).
+        bb = Geom::BoundingBox.new
+        case target_mode
+        when "Selection Only"
+          model.selection.each { |e| bb.add(e.bounds) if e.respond_to?(:bounds) }
+        when "Active Group"
+          path = model.active_path
+          bb.add(path.last.bounds) if path && path.last && path.last.respond_to?(:bounds)
+        else
+          model.entities.each { |e| bb.add(e.bounds) if e.respond_to?(:bounds) && e.valid? }
+        end
+        anchor = bb.valid? ? bb.center : ORIGIN
+
+        xform = Geom::Transformation.scaling(anchor, factor)
         scaled_count = 0
 
         case target_mode

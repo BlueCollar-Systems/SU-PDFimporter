@@ -343,9 +343,12 @@ module BlueCollarSystems
         end
 
       rescue StandardError => e
-        safe_abort_operation(model, "Pipeline:Page#{page_num}")
         Logger.error("Pipeline", "Page #{page_num} failed: #{e.message}", e)
-        raise
+        stats[:failed_pages] ||= []
+        stats[:failed_pages] << { page: page_num, error: e.message }
+        # Continue to next page instead of aborting the entire operation.
+        # Previously this called safe_abort_operation + raise, which
+        # destroyed all geometry from successfully imported pages.
       end
       end
 
@@ -493,7 +496,9 @@ module BlueCollarSystems
         opts = ImportDialog.show(path)
         return unless opts
         stats = run_pipeline(model, path, opts)
-        unless stats
+        if stats
+          ReportDialog.show_report(stats)
+        else
           UI.messagebox("No vector content found in PDF.")
         end
       rescue StandardError => e

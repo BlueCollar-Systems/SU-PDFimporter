@@ -198,8 +198,24 @@ module BlueCollarSystems
       def self.rectangular?(prim)
         pts = prim.points
         return false unless pts && (pts.length == 4 || pts.length == 5)
-        # Check if angles are approximately 90°
-        true  # simplified — full check would measure corner angles
+        # Normalize to 4 unique corners (5th point may duplicate first for closure)
+        corners = pts.length == 5 ? pts[0..3] : pts
+        # Check that all 4 interior angles are approximately 90°
+        (0...4).each do |i|
+          p0 = corners[(i - 1) % 4]
+          p1 = corners[i]
+          p2 = corners[(i + 1) % 4]
+          v1 = [p0[0] - p1[0], p0[1] - p1[1]]
+          v2 = [p2[0] - p1[0], p2[1] - p1[1]]
+          len1 = Math.sqrt(v1[0]**2 + v1[1]**2)
+          len2 = Math.sqrt(v2[0]**2 + v2[1]**2)
+          return false if len1 < 1e-9 || len2 < 1e-9
+          dot = v1[0] * v2[0] + v1[1] * v2[1]
+          cos_angle = dot / (len1 * len2)
+          # cos(90°) = 0; allow ~5° tolerance → |cos| < 0.087
+          return false if cos_angle.abs > 0.087
+        end
+        true
       end
 
     end

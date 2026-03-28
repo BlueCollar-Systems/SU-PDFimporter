@@ -12,11 +12,13 @@ module BlueCollarSystems
       VERSION = '2.0'.freeze
 
       # --- Cleanup presets ------------------------------------------------
+      # Conservative = tightest tolerances (preserves detail, cleans least)
+      # Aggressive   = loosest tolerances  (cleans most, merges more aggressively)
       CLEANUP_PRESETS = {
         'Conservative' => {
-          merge_tolerance:    0.01,
-          collinear_tolerance: 0.005,
-          min_edge_length:    0.005
+          merge_tolerance:    0.001,
+          collinear_tolerance: 0.0005,
+          min_edge_length:    0.001
         },
         'Balanced' => {
           merge_tolerance:    0.005,
@@ -24,9 +26,9 @@ module BlueCollarSystems
           min_edge_length:    0.002
         },
         'Aggressive' => {
-          merge_tolerance:    0.001,
-          collinear_tolerance: 0.0005,
-          min_edge_length:    0.001
+          merge_tolerance:    0.01,
+          collinear_tolerance: 0.005,
+          min_edge_length:    0.005
         }
       }.freeze
 

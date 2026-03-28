@@ -44,6 +44,14 @@ module BlueCollarSystems
 
         find_xref
         parse_xref
+
+        # Check for encrypted PDFs — these produce garbage geometry instead
+        # of a useful error message if we proceed.
+        if @trailer && @trailer['/Encrypt']
+          raise "This PDF is encrypted and cannot be imported. " \
+                "Please remove the encryption (e.g., print to a new PDF) and try again."
+        end
+
         build_page_list
         @page_count = @pages.length
       end
@@ -212,6 +220,12 @@ module BlueCollarSystems
                 decoded = stream_bytes
               end
             end
+          elsif dict_part.include?('/LZWDecode')
+            Logger.warn("PdfParser", "LZWDecode filter is not supported — stream data may be garbled")
+            decoded = stream_bytes
+          elsif dict_part.include?('/ASCIIHexDecode')
+            Logger.warn("PdfParser", "ASCIIHexDecode filter is not supported — stream data may be garbled")
+            decoded = stream_bytes
           elsif dict_part.include?('/Filter')
             decoded = stream_bytes
           else

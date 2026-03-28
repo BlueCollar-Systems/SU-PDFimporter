@@ -515,8 +515,11 @@ module BlueCollarSystems
           # BDC takes two operands: tag and properties
           # For OCG: /OC /MC0 BDC
           if operands.length >= 2
-            tag = operands[-2].to_s
-            props_name = operands[-1].to_s.sub(/\A\//, '')
+            # Operands may be token hashes {type:, value:} or plain strings
+            raw_tag = operands[-2]
+            raw_props = operands[-1]
+            tag = raw_tag.is_a?(Hash) ? raw_tag[:value].to_s : raw_tag.to_s
+            props_name = raw_props.is_a?(Hash) ? raw_props[:value].to_s.sub(/\A\//, '') : raw_props.to_s.sub(/\A\//, '')
             if tag == '/OC' && @ocg_map.key?(props_name)
               @mc_layer_stack.push(@current_ocg_layer)
               @current_ocg_layer = @ocg_map[props_name]

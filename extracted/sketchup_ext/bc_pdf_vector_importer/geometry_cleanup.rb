@@ -129,14 +129,14 @@ module BlueCollarSystems
               # Find all edges connected to this vertex and adjust
               victim.edges.each do |edge|
                 next unless edge.valid?
-                if edge.start == victim
-                  # Move the start point
-                  other = edge.end.position
-                  if other.distance(target_pos) > 0.0001
+                if edge.start == victim || edge.end == victim
+                  # Move whichever end matches the victim vertex
+                  other_vert = (edge.start == victim) ? edge.end : edge.start
+                  if other_vert.position.distance(target_pos) > 0.0001
                     begin
                       entities.transform_entities(
                         Geom::Transformation.new(target_pos - victim.position),
-                        edge.start
+                        victim
                       )
                     rescue StandardError => e
                       Logger.warn("GeometryCleanup", "transform_entities failed: #{e.message}")
