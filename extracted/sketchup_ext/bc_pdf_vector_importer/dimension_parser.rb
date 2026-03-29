@@ -170,7 +170,7 @@ module BlueCollarSystems
         if s =~ /(\d+(?:\.\d+)?)\s*['']\s*[-–]?\s*(\d+(?:\.\d+)?)?\s*(?:(\d+)\s*\/\s*(\d+))?\s*[""]?\s*\z/
           feet = $1.to_f
           inches = $2 ? $2.to_f : 0.0
-          inches += $3.to_f / $4.to_f if $3 && $4
+          inches += $3.to_f / $4.to_f if $3 && $4 && $4.to_f != 0
           return feet * 12.0 + inches
         end
         nil
@@ -180,7 +180,7 @@ module BlueCollarSystems
       def self.parse_imperial(s)
         # Mixed: 1 1/2", 3 3/4
         if s =~ /(\d+)\s+(\d+)\s*\/\s*(\d+)\s*[""]?/
-          return $1.to_f + $2.to_f / $3.to_f
+          return $1.to_f + ($3.to_f != 0 ? $2.to_f / $3.to_f : 0.0)
         end
         # Pure fraction: 13/16, 15/16"
         if s =~ /\A\s*(\d+)\s*\/\s*(\d+)\s*[""]?\s*\z/
@@ -221,7 +221,7 @@ module BlueCollarSystems
 
         # Mixed: 1 1/4
         if s =~ /\A(\d+)\s+(\d+)\s*\/\s*(\d+)\z/
-          return $1.to_f + $2.to_f / $3.to_f
+          return $1.to_f + ($3.to_f != 0 ? $2.to_f / $3.to_f : 0.0)
         end
         # Fraction: 13/16
         if s =~ /\A(\d+)\s*\/\s*(\d+)\z/

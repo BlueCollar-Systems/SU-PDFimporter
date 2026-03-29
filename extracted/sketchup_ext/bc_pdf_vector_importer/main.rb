@@ -14,6 +14,7 @@ module BlueCollarSystems
     require File.join(dir, 'import_config')
     require File.join(dir, 'primitives')
     require File.join(dir, 'logger')
+    require File.join(dir, 'command_runner')
     require File.join(dir, 'pdf_parser')
     require File.join(dir, 'content_stream_parser')
     require File.join(dir, 'text_parser')
@@ -62,6 +63,127 @@ module BlueCollarSystems
       nil
     end
 
+    # Auto-mode flood heuristics (mirrors the FreeCAD importer behavior).
+    # Catches decorative/map pages that are technically vector paths but are not
+    # useful CAD geometry in SketchUp.
+    AUTO_FILL_DRAWING_THRESHOLD = 400
+    AUTO_FILL_HEAVY_RATIO = 0.60
+    AUTO_FILL_STROKE_MAX = 0.22
+    AUTO_FILL_PURE_RATIO = 0.95
+    AUTO_FILL_PURE_STROKE_MAX = 0.02
+    AUTO_FILL_PURE_MIN_GROUPS = 12
+    AUTO_FILL_PURE_MIN_ITEMS = 24
+    AUTO_FILL_PURE_LARGE_RECT_RATIO = 0.03
+
+    def self.path_bbox(path)
+      return nil unless path && path.respond_to?(:subpaths) && path.subpaths
+      min_x = nil
+      min_y = nil
+      max_x = nil
+      max_y = nil
+
+      path.subpaths.each do |sp|
+        next unless sp && sp.respond_to?(:segments) && sp.segments
+        sp.segments.each do |seg|
+          next unless seg && seg.respond_to?(:points) && seg.points
+          seg.points.each do |pt|
+            next unless pt && pt.length >= 2
+            x = pt[0].to_f
+            y = pt[1].to_f
+            min_x = x if min_x.nil? || x < min_x
+            min_y = y if min_y.nil? || y < min_y
+            max_x = x if max_x.nil? || x > max_x
+            max_y = y if max_y.nil? || y > max_y
+          end
+        end
+      end
+      return nil if min_x.nil? || min_y.nil? || max_x.nil? || max_y.nil?
+      [min_x, min_y, max_x, max_y]
+    end
+
+    def self.vector_path_stats(paths, media_box)
+      total = paths ? paths.length : 0
+      empty = {
+        total: 0,
+        fill_only_ratio: 0.0,
+        stroke_ratio: 0.0,
+        fill_only_count: 0,
+        stroke_count: 0,
+        total_item_count: 0,
+        max_rect_ratio: 0.0
+      }
+      return empty if total <= 0
+
+      page_w = ((media_box[2] || 0).to_f - (media_box[0] || 0).to_f).abs
+      page_h = ((media_box[3] || 0).to_f - (media_box[1] || 0).to_f).abs
+      page_area = page_w * page_h
+      page_area = 0.0 if page_area.nan? || page_area.infinite?
+
+      fill_only = 0
+      stroke_count = 0
+      total_items = 0
+      max_rect_ratio = 0.0
+
+      paths.each do |path|
+        has_fill = !!(path && path.fill)
+        has_stroke = !!(path && path.stroke)
+        fill_only += 1 if has_fill && !has_stroke
+        stroke_count += 1 if has_stroke
+
+        if path && path.respond_to?(:subpaths) && path.subpaths
+          path.subpaths.each do |sp|
+            total_items += sp.segments.length if sp && sp.respond_to?(:segments) && sp.segments
+          end
+        end
+
+        if page_area > 0.0
+          bbox = path_bbox(path)
+          if bbox
+            w = (bbox[2] - bbox[0]).abs
+            h = (bbox[3] - bbox[1]).abs
+            ratio = (w * h) / page_area
+            max_rect_ratio = ratio if ratio > max_rect_ratio
+          end
+        end
+      end
+
+      {
+        total: total,
+        fill_only_ratio: fill_only.to_f / total.to_f,
+        stroke_ratio: stroke_count.to_f / total.to_f,
+        fill_only_count: fill_only,
+        stroke_count: stroke_count,
+        total_item_count: total_items,
+        max_rect_ratio: max_rect_ratio
+      }
+    end
+
+    def self.looks_like_fill_art_flood?(paths, media_box)
+      stats = vector_path_stats(paths, media_box)
+      n = stats[:total]
+      fill_ratio = stats[:fill_only_ratio]
+      stroke_ratio = stats[:stroke_ratio]
+      total_items = stats[:total_item_count]
+      max_rect_ratio = stats[:max_rect_ratio]
+
+      pure_fill = fill_ratio >= AUTO_FILL_PURE_RATIO &&
+                  stroke_ratio <= AUTO_FILL_PURE_STROKE_MAX
+      if pure_fill && n >= AUTO_FILL_PURE_MIN_GROUPS
+        if total_items >= AUTO_FILL_PURE_MIN_ITEMS ||
+           max_rect_ratio >= AUTO_FILL_PURE_LARGE_RECT_RATIO
+          return [true, stats]
+        end
+      end
+
+      if n >= AUTO_FILL_DRAWING_THRESHOLD &&
+         fill_ratio >= AUTO_FILL_HEAVY_RATIO &&
+         stroke_ratio <= AUTO_FILL_STROKE_MAX
+        return [true, stats]
+      end
+
+      [false, stats]
+    end
+
     def self.run_pipeline(model, path, opts)
       Logger.reset
       config = RecognitionConfig.default
@@ -90,7 +212,8 @@ module BlueCollarSystems
           return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
                    text: 0, components: 0, layers: [], cleanup: {},
                    generic: nil, mode_used: nil, xobjects: 0,
-                   raster_fallback_used: true }
+                   raster_fallback_used: true,
+                   log_path: Logger.log_path }
         else
           model.abort_operation
           UI.messagebox("Force-raster import failed.\n\nMake sure pdftocairo (from Poppler) is installed.")
@@ -131,7 +254,8 @@ module BlueCollarSystems
                      generic: nil, mode_used: nil, xobjects: 0,
                      text_mode: :none,
                      elapsed_seconds: (Time.now - import_start).round(1),
-                     raster_fallback_used: true }
+                     raster_fallback_used: true,
+                     log_path: Logger.log_path }
           else
             safe_abort_operation(model, "Pipeline")
           end
@@ -157,12 +281,18 @@ module BlueCollarSystems
         model.layers.add(t) unless model.layers[t]
       end
 
+      requested_text_mode = opts[:text_mode]
+      requested_text_mode ||= (opts[:use_3d_text] ? :geometry : (opts[:import_text] ? :labels : :none))
+      requested_text_mode = :none unless opts[:import_text]
+
       stats = { pages: 0, primitives: 0, edges: 0, faces: 0, arcs: 0,
                 text: 0, components: 0, layers: ocg.layer_list, cleanup: {},
                 generic: nil, mode_used: nil, xobjects: 0,
-                text_mode: opts[:use_3d_text] ? :geometry : (opts[:import_text] ? :labels : :none) }
+                text_mode: requested_text_mode }
 
       import_start = Time.now
+      stack_spacing = 1.2
+      running_y_offset = 0.0
 
       pages.each_with_index do |page_num, idx|
        begin
@@ -174,15 +304,27 @@ module BlueCollarSystems
         raw = parser.page_data(page_num)
         next unless raw
         media_box = raw[:media_box] || [0, 0, 612, 792]
+        crop_box = raw[:crop_box]
+        crop_box = nil unless crop_box.is_a?(Array) && crop_box.length >= 4
+        svg_page_box = crop_box || media_box
+        text_offset_x = svg_page_box[0].to_f - media_box[0].to_f
+        text_offset_y = svg_page_box[1].to_f - media_box[1].to_f
+        Logger.info("Pipeline",
+          "Page #{page_num}: text_mode=#{requested_text_mode}, media_box=#{media_box.inspect}, " \
+          "crop_box=#{crop_box ? crop_box.inspect : 'nil'}, text_offset_pts=(#{text_offset_x.round(3)},#{text_offset_y.round(3)})")
+        curr_page_height_in = (media_box[3].to_f - media_box[1].to_f).abs * (1.0 / 72.0) * opts[:scale].to_f
+        curr_page_height_in = 11.0 * opts[:scale].to_f if curr_page_height_in <= 0.0
+        page_y_offset = running_y_offset
         streams = raw[:content_streams]
         if streams.nil? || streams.empty?
           # No content streams — try raster fallback instead of skipping
           if opts[:raster_fallback]
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — No streams, trying raster... [#{elapsed}s]"
-            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start)
+            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
             if raster_ok
               stats[:pages] += 1
               stats[:raster_fallback_used] = true
+              running_y_offset += curr_page_height_in * stack_spacing
             end
           end
           next
@@ -192,6 +334,34 @@ module BlueCollarSystems
         ocg_map = parser.page_ocg_map(page_num)
         cs = ContentStreamParser.new(streams, parser, ocg_map)
         paths = cs.parse
+
+        # Smart auto-raster override for fill-art flood pages.
+        flood_hit, flood_stats = looks_like_fill_art_flood?(paths, media_box)
+        if flood_hit
+          fill_pct = (flood_stats[:fill_only_ratio] * 100.0).round
+          stroke_pct = (flood_stats[:stroke_ratio] * 100.0).round
+          Logger.warn(
+            "Pipeline",
+            "Page #{page_num}: smart mode override — fill-art flood — " \
+            "#{flood_stats[:total]} groups, fill-only=#{fill_pct}%, " \
+            "strokes=#{stroke_pct}% (map/decorative PDF — vectors would be unusable geometry)"
+          )
+
+          if opts[:raster_fallback]
+            Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Fill-art flood, rendering raster... [#{(Time.now - import_start).round(1)}s]"
+            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+            if raster_ok
+              stats[:pages] += 1
+              stats[:raster_fallback_used] = true
+              running_y_offset += curr_page_height_in * stack_spacing
+              next
+            end
+            Logger.warn("Pipeline", "Page #{page_num}: fill-art raster fallback failed; continuing with vectors.")
+          else
+            Logger.warn("Pipeline", "Page #{page_num}: fill-art flood detected but raster fallback is disabled.")
+          end
+        end
+
         xobj = XObjectParser.new(parser)
         xobj.scan_page(page_num)
         xobj.count_references(streams)
@@ -199,19 +369,42 @@ module BlueCollarSystems
         text_items = []
         if opts[:import_text]
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Extracting text... [#{(Time.now - import_start).round(1)}s]"
-          text_items = ExternalTextExtractor.extract(path, page_num)
+          text_items = ExternalTextExtractor.extract(path, page_num,
+            offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
+          text_source = :external
           if text_items.nil? || text_items.empty?
             font_maps = parser.page_font_maps(page_num)
             text_items = TextParser.new(streams, font_maps).parse
+            text_source = :internal
           end
+          Logger.info("Pipeline", "Page #{page_num}: text extractor=#{text_source}, items=#{text_items ? text_items.length : 0}")
         end
+
+        # If the page is text-dominant with little/no vector geometry, importing
+        # only text produces misaligned/low-trust results on OCR/geospatial PDFs.
+        # Prefer a faithful raster import in this case.
+        if opts[:raster_fallback] && paths.length <= 10 && text_items.length >= 200
+          Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Text-heavy page, using raster fallback... [#{(Time.now - import_start).round(1)}s]"
+          Logger.warn("Pipeline",
+            "Page #{page_num}: text-dominant content (paths=#{paths.length}, text=#{text_items.length}) — raster fallback")
+          raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+          if raster_ok
+            stats[:pages] += 1
+            stats[:raster_fallback_used] = true
+            running_y_offset += curr_page_height_in * stack_spacing
+            next
+          end
+          Logger.warn("Pipeline", "Page #{page_num}: text-dominant raster fallback failed; continuing with vectors/text.")
+        end
+
         if paths.empty? && text_items.empty?
           if opts[:raster_fallback]
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Rendering raster image... [#{(Time.now - import_start).round(1)}s]"
-            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start)
+            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
             if raster_ok
               stats[:pages] += 1
               stats[:edges] += 0
+              running_y_offset += curr_page_height_in * stack_spacing
             else
               Logger.warn("Pipeline",
                 "Page #{page_num}: no vector content and raster render failed; page skipped.")
@@ -266,7 +459,8 @@ module BlueCollarSystems
         end
 
         # When geometry text mode: try pdftocairo first, skip text in builder
-        use_svg_text = opts[:use_3d_text] && opts[:import_text]
+        use_svg_text = (requested_text_mode == :geometry) && opts[:import_text]
+        builder_use_3d_text = (requested_text_mode == :text3d)
         builder_text_items = use_svg_text ? [] : text_items
 
         builder = GeometryBuilder.new(model, paths, builder_text_items, media_box,
@@ -277,8 +471,8 @@ module BlueCollarSystems
           import_fills: opts[:import_fills], group_by_color: opts[:group_by_color],
           detect_arcs: opts[:detect_arcs], map_dashes: opts[:map_dashes],
           import_text: use_svg_text ? false : opts[:import_text],
-          use_3d_text: false,  # never use add_3d_text in builder
-          y_offset: idx * (media_box[3] - media_box[1]) * opts[:scale] * 1.2)
+          use_3d_text: builder_use_3d_text,
+          y_offset: page_y_offset)
         result = builder.build
         stats[:edges] += result[:edges]; stats[:faces] += result[:faces]
         stats[:arcs] += result[:arcs]; stats[:text] += result[:text_objects]
@@ -309,27 +503,34 @@ module BlueCollarSystems
         # Render text as precise vector geometry via pdftocairo
         if use_svg_text && builder.page_group
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Rendering text geometry... [#{(Time.now - import_start).round(1)}s]"
-          text_layer = model.layers['PDF Import:Text'] ||
-                       model.layers.add("#{opts[:layer_name] || 'PDF Import'}:Text")
+          text_layer_name = "#{opts[:layer_name] || 'PDF Import'}:Text"
+          text_layer = model.layers[text_layer_name] ||
+                       model.layers.add(text_layer_name)
           svg_result = SvgTextRenderer.render(
             builder.page_group.entities, path, page_num, media_box,
-            scale: opts[:scale], layer: text_layer)
+            scale: opts[:scale], layer: text_layer, y_offset: page_y_offset,
+            svg_page_box: svg_page_box)
 
           if svg_result
             stats[:text] += svg_result[:glyphs]
             stats[:edges] += svg_result[:edges]
             stats[:text_mode] = :geometry
           else
-            # pdftocairo not available — fall back to add_3d_text via builder
+            # SVG glyph text unavailable/disabled — preserve the user's selected
+            # fallback intent (geometry/text3d => add_3d_text, labels => add_text).
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Fallback text rendering... [#{(Time.now - import_start).round(1)}s]"
-            Logger.warn("Pipeline", "pdftocairo not found — falling back to add_3d_text")
+            fallback_use_3d = (requested_text_mode == :geometry || requested_text_mode == :text3d)
+            fallback_mode = fallback_use_3d ? "3D text" : "labels"
+            Logger.warn("Pipeline", "SVG text unavailable — falling back to #{fallback_mode} text")
             fallback_builder = GeometryBuilder.new(model, [], text_items, media_box,
               scale_factor: opts[:scale], layer_name: opts[:layer_name],
               group_per_page: false, page_number: page_num,
-              flatten_to_2d: true, import_text: true, use_3d_text: true,
+              flatten_to_2d: true, import_text: true, use_3d_text: fallback_use_3d,
+              y_offset: page_y_offset,
               target_entities: builder.page_group.entities)
             fb_result = fallback_builder.build
             stats[:text] += fb_result[:text_objects]
+            stats[:text_mode] = fallback_use_3d ? :text3d : :labels
           end
         end
 
@@ -341,6 +542,9 @@ module BlueCollarSystems
             cleanup_level:      opts[:cleanup_level])
           cl.each { |k, v| stats[:cleanup][k] = (stats[:cleanup][k] || 0) + v }
         end
+
+        # Advance the running page stack only after a successful import.
+        running_y_offset += curr_page_height_in * stack_spacing
 
       rescue StandardError => e
         Logger.error("Pipeline", "Page #{page_num} failed: #{e.message}", e)
@@ -408,13 +612,16 @@ module BlueCollarSystems
         Logger.warn("Pipeline", "Auto-fit view failed: #{e.message}")
       end
 
+      stats[:log_path] = Logger.log_path
       stats
+    ensure
+      Logger.flush_log
     end
 
     # ================================================================
     # RASTER FALLBACK — render scanned page as positioned image
     # ================================================================
-    def self.import_page_as_raster(model, pdf_path, page_num, media_box, opts, import_start)
+    def self.import_page_as_raster(model, pdf_path, page_num, media_box, opts, import_start, y_offset = 0.0)
       exe = safe_find_pdftocairo
       return false unless exe
 
@@ -428,12 +635,17 @@ module BlueCollarSystems
       png_path = File.join(Dir.tmpdir,
         "bc_raster_#{Process.pid}_#{Time.now.to_i}_p#{page_num}.png")
 
-      args = [exe, '-png', '-r', dpi.to_s,
+      args = [exe, '-png', '-singlefile', '-r', dpi.to_s,
               '-f', page_num.to_s, '-l', page_num.to_s,
               pdf_path, png_path.sub(/\.png$/, '')]
-      ok = system(*args)
+      run = CommandRunner.run(
+        args,
+        timeout_s: 180,
+        context: "Raster.pdftocairo"
+      )
 
-      # pdftocairo appends page number to filename
+      # With -singlefile, output should be exactly png_path.
+      # Keep legacy candidates for compatibility with older Poppler builds.
       actual_png = nil
       [png_path,
        png_path.sub(/\.png$/, "-#{page_num}.png"),
@@ -446,7 +658,7 @@ module BlueCollarSystems
         end
       end
 
-      return false unless actual_png && File.exist?(actual_png)
+      return false unless run[:ok] && actual_png && File.exist?(actual_png)
 
       begin
         scale = opts[:scale] || 1.0
@@ -454,8 +666,8 @@ module BlueCollarSystems
         img_w = page_w_pts / 72.0 * scale
         img_h = page_h_pts / 72.0 * scale
 
-        # Place image at origin
-        pt = Geom::Point3d.new(0, 0, 0)
+        # Match vector page stacking so raster fallback pages do not overlap.
+        pt = Geom::Point3d.new(0, y_offset.to_f, 0)
         begin
           # add_image available in SketchUp 2017+
           img = model.active_entities.add_image(actual_png, pt, img_w, img_h)
@@ -503,7 +715,9 @@ module BlueCollarSystems
         end
       rescue StandardError => e
         safe_abort_operation(model, "Import")
-        UI.messagebox("Error:\n#{e.message}\n\n#{e.backtrace.first(5).join("\n")}")
+        Logger.error("Import", "Import failed", e)
+        log_hint = Logger.log_path ? "\n\nDetails saved to:\n#{Logger.log_path}" : ""
+        UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
       end
     end
 
@@ -522,58 +736,23 @@ module BlueCollarSystems
         end
       rescue StandardError => e
         safe_abort_operation(model, "ImportSafe")
-        UI.messagebox("Safe mode import error:\n#{e.message}\n\n#{e.backtrace.first(5).join("\n")}")
-      end
-    end
-
-    def self.import_dxf
-      model = Sketchup.active_model
-      return UI.messagebox("No active model.") unless model
-      path = UI.openpanel("Select DXF/DWG File", "",
-                          "DXF/DWG Files|*.dxf;*.DXF;*.dwg;*.DWG||")
-      return unless path && File.exist?(path)
-
-      begin
-        # SketchUp 2017 model.import returns true/false.
-        # Some SU versions need the importer type hint.
-        ok = false
-        ext = File.extname(path).downcase
-
-        # Try with explicit importer options first (SU 2018+)
-        begin
-          if ext == '.dwg' || ext == '.dxf'
-            ok = model.import(path, false)  # false = don't show native options dialog
-          end
-        rescue ArgumentError
-          # SU 2017 import() takes only the path
-          ok = false
-        end
-
-        # Fallback: simple import
-        ok = model.import(path) unless ok
-
-        unless ok
-          UI.messagebox(
-            "DXF/DWG import was not successful.\n\n" \
-            "Possible causes:\n" \
-            "  - DXF/DWG import may not be enabled in this SketchUp version\n" \
-            "  - The file may use features not supported by SketchUp\n\n" \
-            "Try this:\n" \
-            "  1. Go to Window > Preferences > Files\n" \
-            "  2. Verify DXF/DWG is listed under Import\n" \
-            "  3. If not listed, your SketchUp version may not support it\n\n" \
-            "Alternative: Open the DXF in a free viewer like\n" \
-            "LibreCAD and re-save, then try importing again.")
-        end
-      rescue StandardError => e
-        UI.messagebox("DXF/DWG import error:\n#{e.message}")
+        Logger.error("ImportSafe", "Safe mode import failed", e)
+        log_hint = Logger.log_path ? "\n\nDetails saved to:\n#{Logger.log_path}" : ""
+        UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
       end
     end
 
     def self.batch_import
       model = Sketchup.active_model
       return UI.messagebox("No active model.") unless model
-      folder = UI.select_directory(title: "Select Folder of PDFs")
+      # UI.select_directory is not available in SketchUp Make (free) editions.
+      # Fall back to an inputbox for the folder path.
+      folder = if UI.respond_to?(:select_directory)
+                 UI.select_directory(title: "Select Folder of PDFs")
+               else
+                 result = UI.inputbox(["Folder path:"], [""], "Select Folder of PDFs")
+                 result ? result[0] : nil
+               end
       return unless folder && File.directory?(folder)
       pdfs = (Dir.glob(File.join(folder, "*.pdf")) + Dir.glob(File.join(folder, "*.PDF"))).uniq
       return UI.messagebox("No PDF files found.") if pdfs.empty?
@@ -619,13 +798,10 @@ module BlueCollarSystems
     # ================================================================
     unless @loaded
       UI.menu('File').add_item('Import PDF Vectors...') { self.import_pdf }
-      UI.menu('File').add_item('Import PDF Vectors (Safe Mode)...') { self.import_pdf_safe }
-      UI.menu('File').add_item('Import DXF (Native)...') { self.import_dxf }
 
       sub = UI.menu('Extensions').add_submenu('PDF Vector Importer')
       sub.add_item('Import PDF...') { self.import_pdf }
       sub.add_item('Import PDF (Safe Mode)...') { self.import_pdf_safe }
-      sub.add_item('Import DXF (Native)...') { self.import_dxf }
       sub.add_item('Batch Import Folder...') { self.batch_import }
       sub.add_separator
       sub.add_item('Scale to Real Dimensions...') { self.scale_by_reference }
@@ -639,22 +815,12 @@ module BlueCollarSystems
           "BUILT. NOT BOUGHT.")
       }
 
-      tb = UI::Toolbar.new("PDF Vector Importer")
-      [["Import PDF", method(:import_pdf), "Import a PDF drawing"],
-       ["Safe PDF", method(:import_pdf_safe), "Import PDF using conservative fast settings"],
-       ["Import DXF", method(:import_dxf), "Import a DXF using SketchUp's native importer"],
-       ["Scale", method(:scale_by_reference), "Scale to real dimensions"]
-      ].each do |label, action, tip|
-        cmd = UI::Command.new(label) { action.call }
-        cmd.tooltip = tip; cmd.small_icon = cmd.large_icon = ""
-        tb.add_item(cmd)
-      end
-      tb.show if tb.get_last_state == TB_NEVER_SHOWN
-
-      begin
-        Sketchup.register_importer(PDFFileImporter.new)
-      rescue StandardError => e
-        puts "PDF importer registration: #{e.message}" if $VERBOSE
+      if defined?(Sketchup::Importer) && defined?(PDFFileImporter)
+        begin
+          Sketchup.register_importer(PDFFileImporter.new)
+        rescue StandardError => e
+          puts "PDF importer registration: #{e.message}" if $VERBOSE
+        end
       end
 
       @loaded = true
@@ -662,7 +828,11 @@ module BlueCollarSystems
 
     # ================================================================
     # File Importer — drag-drop + File > Import
+    # Guarded: Sketchup::Importer only exists in SU 2017+ Pro/Make
+    # (some early 2017 builds may lack it). If missing, the plugin
+    # still works via the Extensions menu — just no File > Import.
     # ================================================================
+    if defined?(Sketchup::Importer)
     class PDFFileImporter < Sketchup::Importer
       def description; "PDF Vector Drawings (*.pdf)"; end
       def file_extension; "pdf"; end
@@ -682,6 +852,7 @@ module BlueCollarSystems
         Sketchup::Importer::ImportFail
       end
     end
+    end # if defined?(Sketchup::Importer)
 
   end
 end

@@ -11,6 +11,7 @@
 # Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 require 'tmpdir'
+require File.join(File.dirname(__FILE__), 'command_runner')
 
 module BlueCollarSystems
   module PDFVectorImporter
@@ -50,8 +51,12 @@ module BlueCollarSystems
           pdf_path.to_s,
           svg_path.to_s
         ]
-        ok = system(*args)
-        return nil unless ok && File.exist?(svg_path)
+        run = CommandRunner.run(
+          args,
+          timeout_s: 120,
+          context: 'SvgGeometryRenderer.pdftocairo'
+        )
+        return nil unless run[:ok] && File.exist?(svg_path)
 
         svg = File.read(svg_path)
 

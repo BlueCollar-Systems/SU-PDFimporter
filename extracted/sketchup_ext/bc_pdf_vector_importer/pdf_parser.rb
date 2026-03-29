@@ -79,9 +79,11 @@ module BlueCollarSystems
         dict = to_dict(page_obj)
         return nil unless dict
 
-        # MediaBox — may be inherited from parent
+        # Page boxes — may be inherited from parent
         media_box = find_inherited(dict, '/MediaBox')
         media_box = parse_array_nums(media_box) if media_box
+        crop_box = find_inherited(dict, '/CropBox')
+        crop_box = parse_array_nums(crop_box) if crop_box
 
         # Content streams
         contents = dict['/Contents']
@@ -90,7 +92,7 @@ module BlueCollarSystems
           streams = collect_content_streams(contents)
         end
 
-        { media_box: media_box, content_streams: streams }
+        { media_box: media_box, crop_box: crop_box, content_streams: streams }
       end
 
       # ---------------------------------------------------------------
@@ -197,39 +199,60 @@ module BlueCollarSystems
         # Find the stream within the object
         if raw =~ /stream\r?\n/
           stream_start = $~.end(0)
-          # Find endstream
-          endstream_pos = raw.index('endstream', stream_start)
-          return nil unless endstream_pos
-
-          stream_bytes = raw[stream_start...endstream_pos]
-          # Remove trailing \r\n
-          stream_bytes = stream_bytes.sub(/\r?\n\z/, '')
-
-          # Check for FlateDecode filter
           dict_part = raw[0, raw.index('stream')]
-          decoded = nil
-          if dict_part.include?('/FlateDecode')
-            begin
-              decoded = Zlib::Inflate.inflate(stream_bytes)
-            rescue Zlib::DataError
-              # Try with raw deflate (no header)
-              begin
-                decoded = Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(stream_bytes)
-              rescue StandardError => e
-                Logger.warn("PdfParser", "raw deflate failed: #{e.message}")
-                decoded = stream_bytes
-              end
+          stream_len = parse_stream_length(raw)
+          stream_bytes = nil
+
+          if stream_len && stream_len > 0
+            # Use declared /Length when possible. This avoids false early matches
+            # when compressed binary data contains the literal word "endstream".
+            if stream_start + stream_len <= raw.bytesize
+              stream_bytes = raw.byteslice(stream_start, stream_len)
             end
-          elsif dict_part.include?('/LZWDecode')
-            Logger.warn("PdfParser", "LZWDecode filter is not supported — stream data may be garbled")
-            decoded = stream_bytes
-          elsif dict_part.include?('/ASCIIHexDecode')
-            Logger.warn("PdfParser", "ASCIIHexDecode filter is not supported — stream data may be garbled")
-            decoded = stream_bytes
-          elsif dict_part.include?('/Filter')
-            decoded = stream_bytes
-          else
-            decoded = stream_bytes
+          end
+
+          unless stream_bytes
+            # Fallback for malformed length entries.
+            endstream_pos = raw.index('endstream', stream_start)
+            return nil unless endstream_pos
+            stream_bytes = raw[stream_start...endstream_pos]
+            stream_bytes = stream_bytes.sub(/\r?\n\z/, '')
+          end
+
+          decoded = stream_bytes
+
+          filters = extract_stream_filters(raw, dict_part)
+          filters.each do |filter|
+            case filter
+            when '/ASCII85Decode'
+              decoded = ascii85_decode(decoded)
+            when '/ASCIIHexDecode'
+              decoded = ascii_hex_decode(decoded)
+            when '/FlateDecode'
+              begin
+                decoded = Zlib::Inflate.inflate(decoded)
+              rescue Zlib::DataError
+                begin
+                  # Try raw deflate (no zlib header).
+                  decoded = Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(decoded)
+                rescue StandardError => e
+                  Logger.warn("PdfParser", "FlateDecode failed: #{e.message}")
+                  decoded = nil
+                end
+              rescue StandardError => e
+                Logger.warn("PdfParser", "FlateDecode failed: #{e.message}")
+                decoded = nil
+              end
+            when '/RunLengthDecode'
+              decoded = run_length_decode(decoded)
+            when '/LZWDecode'
+              Logger.warn("PdfParser", "LZWDecode is not supported for content streams — skipping stream")
+              decoded = nil
+            else
+              Logger.warn("PdfParser", "Unsupported stream filter #{filter} — skipping stream")
+              decoded = nil
+            end
+            break unless decoded
           end
 
           return nil unless decoded
@@ -246,6 +269,157 @@ module BlueCollarSystems
 
           decoded
         end
+      end
+
+      def parse_stream_length(raw_obj)
+        dict = tokenize_dict(extract_dict(raw_obj))
+        return nil unless dict.is_a?(Hash) && dict['/Length']
+
+        val = resolve_numeric_object(dict['/Length'])
+        return nil if val.nil?
+        n = val.to_i
+        n > 0 ? n : nil
+      rescue StandardError => e
+        Logger.warn("PdfParser", "stream length parse failed: #{e.message}")
+        nil
+      end
+
+      def resolve_numeric_object(val)
+        case val
+        when Numeric
+          val
+        when String
+          s = val.strip
+          if s =~ /\A(\d+)\s+(\d+)\s+R\z/
+            ref_val = resolve_object(s)
+            return resolve_numeric_object(ref_val)
+          end
+          return s.to_i if s =~ /\A[+-]?\d+\z/
+          nil
+        else
+          nil
+        end
+      rescue StandardError
+        nil
+      end
+
+      def extract_stream_filters(raw_obj, dict_part)
+        filters = []
+
+        begin
+          dict = tokenize_dict(extract_dict(raw_obj))
+          f = dict['/Filter'] if dict.is_a?(Hash)
+          if f.is_a?(Array)
+            f.each { |v| filters << normalize_filter_name(v) }
+          elsif f
+            filters << normalize_filter_name(f)
+          end
+        rescue StandardError => e
+          Logger.warn("PdfParser", "filter parse failed, using regex fallback: #{e.message}")
+        end
+
+        # Fallback for malformed dictionaries that fail tokenize_dict.
+        if filters.empty?
+          if dict_part =~ /\/Filter\s*\[([^\]]+)\]/m
+            $1.scan(/\/([A-Za-z0-9]+)/) { |m| filters << "/#{m[0]}" }
+          elsif dict_part =~ /\/Filter\s*\/([A-Za-z0-9]+)/m
+            filters << "/#{$1}"
+          end
+        end
+
+        filters.compact.uniq
+      end
+
+      def normalize_filter_name(val)
+        s = val.to_s.strip
+        return nil if s.empty?
+        s.start_with?('/') ? s : "/#{s}"
+      end
+
+      def ascii85_decode(data)
+        src = data.to_s.dup
+        src.force_encoding('BINARY')
+        src = src.sub(/\A\s*<~/, '')
+        src = src.sub(/~>\s*\z/, '')
+        src.gsub!(/\s+/, '')
+
+        out = ''.dup.force_encoding('BINARY')
+        tuple = []
+
+        src.each_byte do |b|
+          if b == 122 # 'z'
+            if tuple.empty?
+              out << "\x00\x00\x00\x00"
+              next
+            else
+              Logger.warn("PdfParser", "Invalid ASCII85 stream ('z' inside tuple)")
+              return nil
+            end
+          end
+
+          next if b < 33 || b > 117
+          tuple << (b - 33)
+
+          if tuple.length == 5
+            v = ((((tuple[0] * 85 + tuple[1]) * 85 + tuple[2]) * 85 + tuple[3]) * 85 + tuple[4])
+            out << [v].pack('N')
+            tuple.clear
+          end
+        end
+
+        if !tuple.empty?
+          pad = 5 - tuple.length
+          while tuple.length < 5
+            tuple << 84 # 'u' padding
+          end
+          v = ((((tuple[0] * 85 + tuple[1]) * 85 + tuple[2]) * 85 + tuple[3]) * 85 + tuple[4])
+          chunk = [v].pack('N')
+          out << chunk[0, 4 - pad]
+        end
+
+        out
+      rescue StandardError => e
+        Logger.warn("PdfParser", "ASCII85 decode failed: #{e.message}")
+        nil
+      end
+
+      def ascii_hex_decode(data)
+        src = data.to_s.gsub(/\s+/, '')
+        src = src.sub(/>\z/, '')
+        src += '0' if src.length.odd?
+        [src].pack('H*')
+      rescue StandardError => e
+        Logger.warn("PdfParser", "ASCIIHex decode failed: #{e.message}")
+        nil
+      end
+
+      def run_length_decode(data)
+        src = data.to_s
+        out = ''.dup.force_encoding('BINARY')
+        i = 0
+        while i < src.bytesize
+          len = src.getbyte(i)
+          i += 1
+          break if len.nil? || len == 128
+
+          if len <= 127
+            count = len + 1
+            chunk = src.byteslice(i, count)
+            break unless chunk
+            out << chunk
+            i += count
+          else
+            count = 257 - len
+            b = src.getbyte(i)
+            break if b.nil?
+            out << b.chr * count
+            i += 1
+          end
+        end
+        out
+      rescue StandardError => e
+        Logger.warn("PdfParser", "RunLength decode failed: #{e.message}")
+        nil
       end
 
       # Apply PNG predictor decoding (predictors 10-15)

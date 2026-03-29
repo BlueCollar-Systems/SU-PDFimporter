@@ -65,6 +65,10 @@ module BlueCollarSystems
         # Color group cache
         @color_groups = {}
 
+        page_width  = (@media_box[2] - @media_box[0]).abs
+        page_height_pts = (@media_box[3] - @media_box[1]).abs
+        page_area_pts = page_width * page_height_pts
+
         # ── Vector geometry ──
         @paths.each do |path|
           next unless path.subpaths && !path.subpaths.empty?
@@ -72,6 +76,19 @@ module BlueCollarSystems
           should_stroke = path.stroke
           should_fill = path.fill && @import_fills
           next unless should_stroke || should_fill
+
+          # ── Skip paths whose bounding box exceeds the page ──
+          # These are typically decorative backgrounds, clip-fill regions, or
+          # graphic elements that extend far beyond the visible page area.
+          # They produce huge arcs/circles that clutter the import.
+          path_bbox = compute_path_bbox(path)
+          if path_bbox
+            pw = (path_bbox[2] - path_bbox[0]).abs
+            ph = (path_bbox[3] - path_bbox[1]).abs
+            if pw * ph > page_area_pts * 0.95
+              next
+            end
+          end
 
           # Determine target group based on color
           color_rgb = path.stroke_color || [0, 0, 0]
@@ -106,11 +123,11 @@ module BlueCollarSystems
 
             # Arc reconstruction on the polyline
             if @detect_arcs && dash_spec.nil? && su_points.length >= 5
-              draw_with_arc_detection(dest, su_points, path_layer, dash_layer, dash_spec, subpath.closed, should_fill)
+              draw_with_arc_detection(dest, su_points, path_layer, dash_layer, dash_spec, subpath.closed, should_fill, path.fill_color)
             else
               draw_edges(dest, su_points, path_layer, dash_layer, dash_spec, subpath.closed)
               if should_fill && subpath.closed && su_points.length >= 3
-                draw_face(dest, su_points, path_layer)
+                draw_face(dest, su_points, path_layer, path.fill_color)
               end
             end
           end
@@ -190,20 +207,22 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Draw edges with arc detection
       # ---------------------------------------------------------------
-      def draw_with_arc_detection(entities, points, layer, dash_layer, dash_spec, closed, should_fill)
+      def draw_with_arc_detection(entities, points, layer, dash_layer, dash_spec, closed, should_fill, fill_rgb = nil)
         # Convert Point3d to [x,y] for the arc fitter
         pts_2d = points.map { |p| [p.x, p.y] }
 
         segments = ArcFitter.detect_arcs_in_polyline(pts_2d,
           arc_fit_tol: 0.002 * @scale,  # Scale tolerance with import scale
-          min_arc_segments: 3,
+          # Require at least 4 line segments (5 points) before promoting to arc.
+          # 3-segment runs are commonly orthogonal corners that circle-fit badly.
+          min_arc_segments: 4,
           max_arc_segments: 64
         )
 
         if segments.empty?
           draw_edges(entities, points, layer, dash_layer, dash_spec, closed)
           if should_fill && closed && points.length >= 3
-            draw_face(entities, points, layer)
+            draw_face(entities, points, layer, fill_rgb)
           end
           return
         end
@@ -226,26 +245,35 @@ module BlueCollarSystems
               # Calculate angles
               start_angle = Math.atan2(sp.y - cy, sp.x - cx)
               end_angle = Math.atan2(ep.y - cy, ep.x - cx)
-
-              # Calculate sweep (ensure correct direction through midpoint)
               mid_angle = Math.atan2(mp.y - cy, mp.x - cx)
-              sweep = end_angle - start_angle
 
-              # Normalize sweep direction using midpoint
-              while sweep < -Math::PI; sweep += 2 * Math::PI; end
-              while sweep > Math::PI; sweep -= 2 * Math::PI; end
-
-              # Check if midpoint is on the correct side
-              test_mid = start_angle + sweep / 2.0
-              mid_diff = (mid_angle - test_mid).abs
-              while mid_diff > Math::PI; mid_diff -= 2 * Math::PI; end
-              if mid_diff.abs > Math::PI / 2
-                # Wrong direction — flip
-                if sweep > 0
-                  sweep -= 2 * Math::PI
-                else
-                  sweep += 2 * Math::PI
+              # Always use the minor arc between endpoints. If the midpoint
+              # does not align with that sweep, this is not a valid arc run.
+              sweep = normalize_angle(end_angle - start_angle)
+              if sweep.abs < 1e-4
+                # Degenerate sweep — render as original polyline
+                seg[:points].each_cons(2) do |pa, pb|
+                  p1 = Geom::Point3d.new(pa[0], pa[1], 0)
+                  p2 = Geom::Point3d.new(pb[0], pb[1], 0)
+                  e = safe_add_line(entities, p1, p2, layer, dash_layer, dash_spec)
+                  all_edges << e if e
                 end
+                next
+              end
+
+              # Midpoint consistency check:
+              # if midpoint is far from the expected minor sweep centerline,
+              # do NOT flip to a major arc (which creates huge circles).
+              test_mid = normalize_angle(start_angle + sweep / 2.0)
+              mid_diff = normalize_angle(mid_angle - test_mid).abs
+              if mid_diff > Math::PI / 2
+                seg[:points].each_cons(2) do |pa, pb|
+                  p1 = Geom::Point3d.new(pa[0], pa[1], 0)
+                  p2 = Geom::Point3d.new(pb[0], pb[1], 0)
+                  e = safe_add_line(entities, p1, p2, layer, dash_layer, dash_spec)
+                  all_edges << e if e
+                end
+                next
               end
 
               xaxis = Geom::Vector3d.new(Math.cos(start_angle), Math.sin(start_angle), 0)
@@ -297,7 +325,7 @@ module BlueCollarSystems
 
         # Create face from closed paths
         if should_fill && closed && all_edges.length >= 3
-          draw_face(entities, points, layer)
+          draw_face(entities, points, layer, fill_rgb)
         end
       end
 
@@ -374,12 +402,15 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Face creation
       # ---------------------------------------------------------------
-      def draw_face(entities, points, layer)
+      def draw_face(entities, points, layer, fill_rgb = nil)
         return if points.length < 3
         begin
           face = entities.add_face(points)
           if face
             set_layer(face, layer)
+            if fill_rgb && fill_rgb.is_a?(Array) && fill_rgb.length >= 3
+              face.material = get_or_create_material(fill_rgb)
+            end
             @face_count += 1
           end
         rescue StandardError => e
@@ -417,7 +448,9 @@ module BlueCollarSystems
               bbox_h = fs
               fs = fs * 0.30
               # Shift origin up: bbox bottom includes descender space
-              baseline_shift = bbox_h * 0.10 * PDF_POINT_TO_INCH * @scale
+              # Keep this conservative to avoid drift on rotated/angled blueprint text.
+              baseline_ratio = (item.angle && item.angle.to_f.abs > 10.0) ? 0.0 : 0.05
+              baseline_shift = bbox_h * baseline_ratio * PDF_POINT_TO_INCH * @scale
               pt = Geom::Point3d.new(pt.x, pt.y + baseline_shift, pt.z)
             end
 
@@ -517,6 +550,41 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Dash pattern → layer/tag classification
       # ---------------------------------------------------------------
+      # Get or create a SketchUp material from an [r, g, b] 0.0–1.0 array.
+      # Caches materials to avoid duplicates.
+      def get_or_create_material(rgb)
+        @material_cache ||= {}
+        r = (rgb[0].to_f * 255).round
+        g = (rgb[1].to_f * 255).round
+        b = (rgb[2].to_f * 255).round
+        key = "PDF_#{r}_#{g}_#{b}"
+        return @material_cache[key] if @material_cache[key]
+        mat = @model.materials[key]
+        unless mat
+          mat = @model.materials.add(key)
+          mat.color = Sketchup::Color.new(r, g, b)
+        end
+        @material_cache[key] = mat
+        mat
+      end
+
+      # Compute bounding box of a VectorPath in PDF user-space points.
+      # Returns [min_x, min_y, max_x, max_y] or nil.
+      def compute_path_bbox(path)
+        xs = []
+        ys = []
+        path.subpaths.each do |sp|
+          sp.segments.each do |seg|
+            seg.points.each do |pt|
+              xs << pt[0] if pt[0]
+              ys << pt[1] if pt[1]
+            end
+          end
+        end
+        return nil if xs.empty?
+        [xs.min, ys.min, xs.max, ys.max]
+      end
+
       def classify_dash(dash_pattern)
         return nil unless @map_dashes && dash_pattern
         arr = dash_pattern
@@ -665,6 +733,16 @@ module BlueCollarSystems
           end
         end
         result
+      end
+
+      def normalize_angle(angle)
+        while angle <= -Math::PI
+          angle += 2 * Math::PI
+        end
+        while angle > Math::PI
+          angle -= 2 * Math::PI
+        end
+        angle
       end
 
       def get_or_create_layer(name)

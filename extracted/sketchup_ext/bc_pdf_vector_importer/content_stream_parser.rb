@@ -8,6 +8,7 @@
 module BlueCollarSystems
   module PDFVectorImporter
     class ContentStreamParser
+      MAX_TOKENS_PER_STREAM = 1_000_000
 
       # A VectorPath represents one complete path with its sub-paths
       VectorPath = Struct.new(
@@ -146,6 +147,11 @@ module BlueCollarSystems
         len = stream.length
 
         while i < len
+          if tokens.length > MAX_TOKENS_PER_STREAM
+            Logger.warn("ContentParser", "Token limit reached (#{MAX_TOKENS_PER_STREAM}) — truncating stream parse")
+            break
+          end
+
           c = stream[i]
 
           # Whitespace
@@ -247,6 +253,14 @@ module BlueCollarSystems
           while j < len && stream[j] !~ /[\s\[\]<>(){}\/\%]/
             j += 1
           end
+
+          # Safety: if current char is an unhandled delimiter (for example '{' or '}'),
+          # consume it so we don't loop forever on malformed/binary data.
+          if j == i
+            i += 1
+            next
+          end
+
           word = stream[i...j]
 
           # Inline image: BI <key-value pairs> ID <binary data> EI
@@ -335,22 +349,22 @@ module BlueCollarSystems
 
         # --- Color operators ---
         when 'G'  # Stroke gray
-          @stroke_color = [nums[0] || 0] * 3
+          @stroke_color = nums_to_rgb(nums, '/DeviceGray')
           @color_space_stroke = '/DeviceGray'
 
         when 'g'  # Fill gray
-          @fill_color = [nums[0] || 0] * 3
+          @fill_color = nums_to_rgb(nums, '/DeviceGray')
           @color_space_fill = '/DeviceGray'
 
         when 'RG' # Stroke RGB
           if nums.length >= 3
-            @stroke_color = nums[0, 3]
+            @stroke_color = nums_to_rgb(nums, '/DeviceRGB')
             @color_space_stroke = '/DeviceRGB'
           end
 
         when 'rg' # Fill RGB
           if nums.length >= 3
-            @fill_color = nums[0, 3]
+            @fill_color = nums_to_rgb(nums, '/DeviceRGB')
             @color_space_fill = '/DeviceRGB'
           end
 
@@ -375,10 +389,12 @@ module BlueCollarSystems
           @color_space_fill = name_token[:value] if name_token
 
         when 'SC', 'SCN' # Stroke color (general)
-          @stroke_color = nums_to_rgb(nums, @color_space_stroke)
+          # Pattern-only SCN may provide no numeric components.
+          @stroke_color = nums_to_rgb(nums, @color_space_stroke) unless nums.empty?
 
         when 'sc', 'scn' # Fill color (general)
-          @fill_color = nums_to_rgb(nums, @color_space_fill)
+          # Pattern-only scn may provide no numeric components.
+          @fill_color = nums_to_rgb(nums, @color_space_fill) unless nums.empty?
 
         # --- Path construction ---
         when 'm'  # moveto
@@ -609,28 +625,64 @@ module BlueCollarSystems
       # ---------------------------------------------------------------
       # Color helpers
       # ---------------------------------------------------------------
+      def clamp01(v)
+        n = begin
+          Float(v)
+        rescue StandardError
+          0.0
+        end
+        n = 0.0 if n.nan? || n.infinite?
+        [[n, 0.0].max, 1.0].min
+      end
+
+      def clamp_rgb(rgb)
+        arr = rgb.is_a?(Array) ? rgb : []
+        [
+          clamp01(arr[0] || 0.0),
+          clamp01(arr[1] || arr[0] || 0.0),
+          clamp01(arr[2] || arr[1] || arr[0] || 0.0)
+        ]
+      end
+
       def cmyk_to_rgb(c, m, y, k)
+        c = clamp01(c)
+        m = clamp01(m)
+        y = clamp01(y)
+        k = clamp01(k)
         r = (1.0 - c) * (1.0 - k)
         g = (1.0 - m) * (1.0 - k)
         b = (1.0 - y) * (1.0 - k)
-        [r, g, b]
+        clamp_rgb([r, g, b])
       end
 
       def nums_to_rgb(nums, color_space)
+        safe = (nums || []).map do |n|
+          begin
+            Float(n)
+          rescue StandardError
+            0.0
+          end
+        end
+
         case color_space
         when '/DeviceGray'
-          v = nums[0] || 0
+          v = clamp01(safe[0] || 0.0)
           [v, v, v]
         when '/DeviceRGB'
-          [nums[0] || 0, nums[1] || 0, nums[2] || 0]
+          clamp_rgb([safe[0] || 0.0, safe[1] || 0.0, safe[2] || 0.0])
         when '/DeviceCMYK'
-          cmyk_to_rgb(nums[0] || 0, nums[1] || 0, nums[2] || 0, nums[3] || 0)
+          cmyk_to_rgb(safe[0] || 0.0, safe[1] || 0.0, safe[2] || 0.0, safe[3] || 0.0)
         else
-          # Unknown color space — use values as RGB if 3, gray if 1
-          if nums.length >= 3
-            [nums[0], nums[1], nums[2]]
-          elsif nums.length >= 1
-            [nums[0]] * 3
+          # Unknown color space — best-effort fallback:
+          # - 4 channels are commonly CMYK-like (ICCBased/Separation wrappers)
+          # - otherwise use first 3 channels as RGB, or replicate gray.
+          if safe.length >= 4
+            cmyk_to_rgb(safe[0], safe[1], safe[2], safe[3])
+          elsif safe.length >= 3
+            clamp_rgb([safe[0], safe[1], safe[2]])
+          elsif safe.length >= 1
+            v = clamp01(safe[0])
+            [v, v, v]
           else
             [0, 0, 0]
           end

@@ -95,7 +95,7 @@ module BlueCollarSystems
         if text =~ /\A\s*(\d+(?:\.\d+)?)\s*(?:'|ft|feet)\s*[-–]?\s*(\d+(?:\.\d+)?)?\s*(?:(\d+)\s*\/\s*(\d+))?\s*(?:"|in|inch|inches)?\s*\z/i
           feet = $1.to_f
           inches = $2 ? $2.to_f : 0.0
-          if $3 && $4
+          if $3 && $4 && $4.to_f != 0
             frac = $3.to_f / $4.to_f
             inches += frac
           end
@@ -108,7 +108,7 @@ module BlueCollarSystems
         # Pattern: 1 1/2 in  3 3/4 ft  2 5/8
         if text =~ /\A\s*(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)\s*([a-zA-Z"']+)?\s*\z/
           whole = $1.to_f
-          frac = $2.to_f / $3.to_f
+          frac = $3.to_f != 0 ? $2.to_f / $3.to_f : 0.0
           unit_str = $4
           value = whole + frac
           factor = unit_factor(unit_str)

@@ -43,6 +43,7 @@ module BlueCollarSystems
         if text > 0
           mode_label = case stats[:text_mode]
                        when :geometry then "as geometry"
+                       when :text3d then "as 3D text"
                        when :labels then "as labels"
                        else ""
                        end
@@ -121,6 +122,13 @@ module BlueCollarSystems
           lines << "Import quality: Low — limited vector content found."
         else
           lines << "No geometry was found in this PDF."
+        end
+
+        log_path = stats[:log_path].to_s
+        unless log_path.empty?
+          lines << ""
+          lines << "Import log:"
+          lines << log_path
         end
 
         lines.join("\n")

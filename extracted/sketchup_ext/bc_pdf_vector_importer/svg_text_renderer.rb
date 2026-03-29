@@ -8,6 +8,7 @@
 # Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 require 'tmpdir'
+require File.join(File.dirname(__FILE__), 'command_runner')
 
 module BlueCollarSystems
   module PDFVectorImporter
@@ -20,9 +21,17 @@ module BlueCollarSystems
         return nil unless exe
 
         scale = opts[:scale] || 1.0
-        origin_x = media_box[0].to_f
-        origin_y = media_box[1].to_f
-        page_h   = (media_box[3] - media_box[1]).abs
+        y_offset = opts[:y_offset] || 0.0
+        text_layer = opts[:layer]
+        svg_page_box = opts[:svg_page_box] || media_box
+        media_min_x = media_box[0].to_f
+        media_min_y = media_box[1].to_f
+        svg_min_x = svg_page_box[0].to_f
+        svg_min_y = svg_page_box[1].to_f
+        page_w   = (svg_page_box[2] - svg_page_box[0]).abs.to_f
+        page_h   = (svg_page_box[3] - svg_page_box[1]).abs.to_f
+        box_offset_x_in = (svg_min_x - media_min_x) * PDF_PT_TO_INCH * scale.to_f
+        box_offset_y_in = (svg_min_y - media_min_y) * PDF_PT_TO_INCH * scale.to_f
 
         svg_path = File.join(Dir.tmpdir,
           "bc_svg_#{Process.pid}_#{Time.now.to_i}_#{rand(100000)}.svg")
@@ -32,16 +41,39 @@ module BlueCollarSystems
           '-svg',
           '-f', page_num.to_i.to_s,
           '-l', page_num.to_i.to_s,
+          '--',
           pdf_path.to_s,
           svg_path.to_s
         ]
-        ok = system(*args)
-        return nil unless ok && File.exist?(svg_path)
+        run = CommandRunner.run(
+          args,
+          timeout_s: 90,
+          context: 'SvgTextRenderer.pdftocairo'
+        )
+        return nil unless run[:ok] && File.exist?(svg_path)
 
         svg = File.read(svg_path)
         glyphs = parse_glyph_defs(svg)
         placements = parse_use_placements(svg)
         return { edges: 0, glyphs: 0 } if placements.empty?
+
+        # OCR-backed PDFs can contain many "#source-*" uses for embedded images.
+        # Do not disable glyph rendering solely because of source image uses:
+        # that fallback causes text drift on symbol charts and OCR overlays.
+        source_use_count = svg.scan(/<use\b[^>]*(?:xlink:href|href)="#source-[^"]+"/).length
+        if source_use_count > 0
+          Logger.info("SvgTextRenderer",
+            "Page #{page_num}: source_uses=#{source_use_count}, glyph_uses=#{placements.length} (rendering glyph geometry)")
+        end
+
+        vb_min_x, vb_min_y, vb_w, vb_h = parse_viewbox(svg)
+        vb_w = page_w if vb_w <= 0.0
+        vb_h = page_h if vb_h <= 0.0
+        # pdftocairo SVG coordinates are already in PDF points for the rendered
+        # page box (often CropBox). Use direct pt->inch conversion to avoid
+        # MediaBox-vs-CropBox rescaling drift on OCR/chart PDFs.
+        x_unit_to_in = PDF_PT_TO_INCH * scale.to_f
+        y_unit_to_in = PDF_PT_TO_INCH * scale.to_f
 
         model = entities.model || Sketchup.active_model
         edge_count = 0
@@ -52,7 +84,7 @@ module BlueCollarSystems
         glyph_defs = {}
         glyphs.each do |glyph_id, path_d|
           next if path_d.strip.empty?
-          subpaths = svg_path_to_points(path_d, scale)
+          subpaths = svg_path_to_points(path_d, x_unit_to_in, y_unit_to_in)
           next if subpaths.empty?
 
           defn = model.definitions.add("_g_#{glyph_id}")
@@ -78,14 +110,36 @@ module BlueCollarSystems
           defn = glyph_defs[p[:glyph_id]]
           next unless defn
 
-          pdf_x = p[:x] - origin_x
-          pdf_y = (page_h - p[:y]) - origin_y
-          x_inch = pdf_x * PDF_PT_TO_INCH * scale
-          y_inch = pdf_y * PDF_PT_TO_INCH * scale
-
           begin
-            entities.add_instance(defn,
-              Geom::Transformation.new(Geom::Point3d.new(x_inch, y_inch, 0.0)))
+            tr = nil
+            if p[:matrix].is_a?(Array) && p[:matrix].length >= 6
+              a, b, c, d, e, f = p[:matrix].map(&:to_f)
+              # SVG <use> x/y are additive placement offsets.
+              e += p[:x].to_f
+              f += p[:y].to_f
+
+              tx = (e - vb_min_x) * x_unit_to_in + box_offset_x_in
+              ty = (vb_h + vb_min_y - f) * y_unit_to_in + y_offset.to_f + box_offset_y_in
+
+              # Local glyph coordinates are scaled to inches and Y-flipped.
+              ratio_xy = y_unit_to_in.zero? ? 1.0 : (x_unit_to_in / y_unit_to_in)
+              ratio_yx = x_unit_to_in.zero? ? 1.0 : (y_unit_to_in / x_unit_to_in)
+              xaxis = Geom::Vector3d.new(a, -b * ratio_yx, 0.0)
+              yaxis = Geom::Vector3d.new(-c * ratio_xy, d, 0.0)
+              zaxis = Geom::Vector3d.new(0.0, 0.0, 1.0)
+              tr = Geom::Transformation.axes(Geom::Point3d.new(tx, ty, 0.0), xaxis, yaxis, zaxis)
+            else
+              tx = (p[:x].to_f - vb_min_x) * x_unit_to_in + box_offset_x_in
+              ty = (vb_h + vb_min_y - p[:y].to_f) * y_unit_to_in + y_offset.to_f + box_offset_y_in
+              tr = Geom::Transformation.new(Geom::Point3d.new(tx, ty, 0.0))
+            end
+
+            inst = entities.add_instance(defn, tr)
+            begin
+              inst.layer = text_layer if inst && text_layer
+            rescue StandardError => e
+              Logger.warn("SvgTextRenderer", "set_layer on glyph instance failed: #{e.message}")
+            end
             glyph_count += 1
           rescue StandardError => e
             Logger.warn("SvgTextRenderer", "add_instance for glyph failed: #{e.message}")
@@ -115,13 +169,17 @@ module BlueCollarSystems
         return env if env && !env.empty? && File.exist?(env)
 
         begin
+          # Common local/system installs
+          candidates = []
           if ENV['LOCALAPPDATA'] && !ENV['LOCALAPPDATA'].empty?
-            miktex = File.join(ENV['LOCALAPPDATA'],
+            candidates << File.join(ENV['LOCALAPPDATA'],
               'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', 'pdftocairo.exe')
-            return miktex if File.exist?(miktex)
           end
-          g = 'C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdftocairo.exe'
-          return g if File.exist?(g)
+          candidates << 'C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdftocairo.exe'
+          # FreeCAD bundles poppler utils in many installs.
+          candidates << 'C:\\Program Files\\FreeCAD 1.1\\bin\\pdftocairo.exe'
+          Dir.glob('C:/Program Files/FreeCAD*/bin/pdftocairo.exe').each { |p| candidates << p }
+          candidates.each { |p| return p if File.exist?(p) }
         rescue StandardError => e
           Logger.warn("SvgTextRenderer", "find_pdftocairo path search failed: #{e.message}")
         end
@@ -157,15 +215,52 @@ module BlueCollarSystems
 
       def self.parse_use_placements(svg)
         a = []
-        svg.scan(/<use xlink:href="#(glyph-\d+-\d+)" x="([^"]+)" y="([^"]+)"/) do |id, x, y|
-          a << { glyph_id: id, x: x.to_f, y: y.to_f }
+        svg.scan(/<use\b[^>]*>/m) do |m|
+          tag = m.is_a?(Array) ? m.first.to_s : m.to_s
+          href = tag[/\bxlink:href="([^"]+)"/, 1] || tag[/\bhref="([^"]+)"/, 1]
+          next unless href && href.start_with?('#')
+          id = href[1..-1]
+          next unless id.start_with?('glyph-')
+
+          x = (tag[/\bx="([^"]+)"/, 1] || '0').to_f
+          y = (tag[/\by="([^"]+)"/, 1] || '0').to_f
+
+          matrix = nil
+          tr = tag[/\btransform="([^"]+)"/, 1]
+          if tr && tr =~ /matrix\(([^)]+)\)/i
+            vals = $1.split(/[,\s]+/).reject(&:empty?).map(&:to_f)
+            matrix = vals[0, 6] if vals.length >= 6
+          end
+
+          a << { glyph_id: id, x: x, y: y, matrix: matrix }
         end
         a
       end
 
+      def self.parse_viewbox(svg)
+        if (m = svg.match(/viewBox="([^"]+)"/i))
+          vals = m[1].split(/[\s,]+/).reject(&:empty?).map(&:to_f)
+          return vals[0], vals[1], vals[2], vals[3] if vals.length >= 4
+        end
+        [0.0, 0.0, 0.0, 0.0]
+      rescue StandardError => e
+        Logger.warn("SvgTextRenderer", "parse_viewbox failed: #{e.message}")
+        [0.0, 0.0, 0.0, 0.0]
+      end
+
       # Convert SVG path to arrays of SketchUp Point3d.
-      # Glyph coords are in PDF points, Y-down. We flip Y and scale to inches.
-      def self.svg_path_to_points(d, scale)
+      # Glyph coords are in SVG viewBox units, Y-down.
+      # Convert to model inches with potentially non-uniform scaling.
+      def self.svg_path_to_points(d, scale_or_x_unit_to_in, y_unit_to_in = nil)
+        if y_unit_to_in.nil?
+          # Backward compatibility: 2-arg call treated as isotropic scale factor.
+          x_unit_to_in = PDF_PT_TO_INCH * scale_or_x_unit_to_in.to_f
+          y_unit_to_in = x_unit_to_in
+        else
+          x_unit_to_in = scale_or_x_unit_to_in.to_f
+          y_unit_to_in = y_unit_to_in.to_f
+        end
+
         tokens = d.scan(/[MLHVCSZmlhvcsz]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/)
         subpaths = []
         current = []
@@ -174,8 +269,7 @@ module BlueCollarSystems
         cmd = nil; nums = []
 
         mk = lambda { |gx, gy|
-          Geom::Point3d.new(gx * PDF_PT_TO_INCH * scale,
-                            -gy * PDF_PT_TO_INCH * scale, 0.0)
+          Geom::Point3d.new(gx * x_unit_to_in, -gy * y_unit_to_in, 0.0)
         }
 
         run = lambda {

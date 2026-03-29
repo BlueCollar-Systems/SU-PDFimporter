@@ -6,13 +6,17 @@
 
 require 'cgi'
 require 'tmpdir'
+require File.join(File.dirname(__FILE__), 'command_runner')
 
 module BlueCollarSystems
   module PDFVectorImporter
     module ExternalTextExtractor
       class << self
         # Returns Array<TextParser::TextItem>
-        def extract(pdf_path, page_number)
+        # opts:
+        #   :offset_x_pts, :offset_y_pts — added to extracted PDF coordinates
+        #   to map crop-space coordinates back into media-space coordinates.
+        def extract(pdf_path, page_number, opts = {})
           exe = pdftotext_executable
           return [] unless exe && File.exist?(pdf_path.to_s)
 
@@ -26,15 +30,23 @@ module BlueCollarSystems
             '-f', page_number.to_i.to_s,
             '-l', page_number.to_i.to_s,
             '-bbox-layout',
+            # Keep coordinate space consistent with pdftocairo SVG rendering.
+            # Without -cropbox, pdftotext emits MediaBox coordinates on PDFs
+            # where CropBox != MediaBox, which introduces text drift.
+            '-cropbox',
             pdf_path.to_s,
             out_html.to_s
           ]
 
-          ok = system(*args)
-          return [] unless ok && File.exist?(out_html)
+          run = CommandRunner.run(
+            args,
+            timeout_s: 45,
+            context: 'ExternalTextExtractor.pdftotext'
+          )
+          return [] unless run[:ok] && File.exist?(out_html)
 
           html = File.read(out_html)
-          parse_bbox_html(html)
+          parse_bbox_html(html, opts)
         rescue StandardError => e
           begin
             Logger.warn('ExternalTextExtractor', "pdftotext fallback: #{e.message}")
@@ -59,6 +71,8 @@ module BlueCollarSystems
 
           # 2) Common Windows install path (MiKTeX)
           candidates = []
+          candidates << 'C:\\Program Files\\poppler\\Library\\bin\\pdftotext.exe'
+          candidates << 'C:\\Program Files\\poppler\\bin\\pdftotext.exe'
           if ENV['LOCALAPPDATA'] && !ENV['LOCALAPPDATA'].empty?
             candidates << File.join(
               ENV['LOCALAPPDATA'],
@@ -69,20 +83,25 @@ module BlueCollarSystems
           candidates.each { |p| return p if File.exist?(p) }
 
           # 3) PATH
-          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/
-            return 'pdftotext' if system('pdftotext -v >NUL 2>&1')
-          else
-            return 'pdftotext' if system('pdftotext -v >/dev/null 2>&1')
+          begin
+            probe = CommandRunner.run(['pdftotext', '-v'],
+              timeout_s: 10,
+              context: 'ExternalTextExtractor.pdftotext_probe')
+            return 'pdftotext' if probe[:ok]
+          rescue StandardError => e
+            Logger.warn('ExternalTextExtractor', "PATH probe failed: #{e.message}")
           end
 
           nil
         end
 
-        def parse_bbox_html(html)
+        def parse_bbox_html(html, opts = {})
           return [] if html.to_s.empty?
 
           page_h = html[/<page[^>]*height="([0-9.]+)"/i, 1].to_f
           return [] if page_h <= 0.0
+          offset_x = opts[:offset_x_pts].to_f
+          offset_y = opts[:offset_y_pts].to_f
 
           items = []
 
@@ -123,11 +142,12 @@ module BlueCollarSystems
             end
             font_size = [font_size, 1.0].max
 
-            y_pdf = page_h - y_max
+            x_pdf = x_min + offset_x
+            y_pdf = (page_h - y_max) + offset_y
 
             items << TextParser::TextItem.new(
               line_text,
-              x_min,
+              x_pdf,
               y_pdf,
               font_size,
               angle,
@@ -155,11 +175,9 @@ module BlueCollarSystems
 
           # Clean common dimension spacing artifacts from bbox output.
           t = t.gsub(/(\d)\s*\/\s*(\d)/, '\\1/\\2')
-          # Repair common truncated denominator artifact from stacked fractions:
-          # "15/1" -> "15/16", "11/1" -> "11/16"
-          t = t.gsub(/(\d{1,2})\s*\/\s*1\b/, '\\1/16')
-          # Another common truncation in this drawing set: "3/6" -> "3/16".
-          t = t.gsub(/(\d{1,2})\s*\/\s*6\b/, '\\1/16')
+          # Do NOT blindly rewrite denominator digits here (e.g. /1 -> /16):
+          # that can silently corrupt valid dimensions. Denominator repair is
+          # handled later by context-aware merge/rebuild heuristics.
           t = t.gsub(/(\d)\s*'\s*-\s*(\d)/, "\\1'-\\2")
           t = t.gsub(/(\d)\s*-\s*(\d)/, '\\1-\\2')
           t = t.gsub(/\s+"/, '"')
@@ -420,10 +438,13 @@ module BlueCollarSystems
         # Remove tiny leftovers when a nearby merged composite already contains
         # the same value (e.g., keep "R 2 1/2", drop nearby standalone "1/2").
         def drop_redundant_fragments(items)
-          items.reject.with_index do |it, idx|
+          # Ruby 2.2 compat: .reject.with_index requires 2.4+.
+          # Use explicit loop to build the filtered list.
+          reject_indices = []
+          items.each_with_index do |it, idx|
             t = it.text.to_s.strip
 
-            if t =~ /\A\d{1,2}\/(?:2|4|8|16|32|64)\z/
+            should_reject = if t =~ /\A\d{1,2}\/(?:2|4|8|16|32|64)\z/
               items.each_with_index.any? do |other, j|
                 next false if idx == j
                 ot = other.text.to_s
@@ -443,7 +464,7 @@ module BlueCollarSystems
                 dx = (other.x.to_f - it.x.to_f).abs
                 dy = (other.y.to_f - it.y.to_f).abs
                 dx <= [it.font_size.to_f * 3.0, 42.0].max &&
-                  dy <= [it.font_size.to_f * 2.0, 34.0].max
+                  dy <= [it.font_size.to_f * 1.8, 30.0].max
               end
             elsif t =~ /\A(2|4|8|16|32|64)\z/
               den = Regexp.last_match(1)
@@ -455,14 +476,19 @@ module BlueCollarSystems
                 dx = (other.x.to_f - it.x.to_f).abs
                 dy = (other.y.to_f - it.y.to_f).abs
                 da = (other.angle.to_f - it.angle.to_f).abs
-                dx <= [it.font_size.to_f * 2.2, 30.0].max &&
-                  dy <= [it.font_size.to_f * 2.4, 34.0].max &&
+                dx <= [it.font_size.to_f * 3.0, 42.0].max &&
+                  dy <= [it.font_size.to_f * 1.8, 30.0].max &&
                   da <= 35.0
               end
             else
               false
             end
+
+            reject_indices << idx if should_reject
           end
+          result = []
+          items.each_with_index { |it2, i| result << it2 unless reject_indices.include?(i) }
+          result
         end
 
         def estimate_angle(words, line_attrs = nil)

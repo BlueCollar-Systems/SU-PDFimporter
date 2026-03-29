@@ -3,6 +3,7 @@
 # Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 require 'tmpdir'
+require 'fileutils'
 
 module BlueCollarSystems
   module PDFVectorImporter
@@ -11,6 +12,7 @@ module BlueCollarSystems
       @errors = []
       @debug = false
       @log_file = nil
+      @log_path = nil
 
       def self.debug=(val); @debug = val; end
       def self.debug?; @debug; end
@@ -18,15 +20,43 @@ module BlueCollarSystems
       def self.reset
         @warnings = []
         @errors = []
-        # Open a log file in the system temp directory for post-session diagnosis.
+        close_log
+
+        # Open a log file for post-session diagnosis.
         # Previous log is overwritten each import so it stays small.
+        candidate_dirs = []
         begin
-          dir = File.join(Dir.tmpdir, 'bc_pdf_importer')
-          Dir.mkdir(dir) unless Dir.exist?(dir)
-          @log_file = File.open(File.join(dir, 'last_import.log'), 'w')
-          @log_file.puts "--- PDF Vector Importer log #{Time.now.strftime('%Y-%m-%d %H:%M:%S')} ---"
+          candidate_dirs << File.join(Dir.tmpdir, 'bc_pdf_importer')
         rescue StandardError
-          @log_file = nil
+          # continue with env/home fallbacks below
+        end
+        if ENV['LOCALAPPDATA'] && !ENV['LOCALAPPDATA'].empty?
+          candidate_dirs << File.join(ENV['LOCALAPPDATA'], 'bc_pdf_importer')
+        end
+        if ENV['TEMP'] && !ENV['TEMP'].empty?
+          candidate_dirs << File.join(ENV['TEMP'], 'bc_pdf_importer')
+        end
+        begin
+          candidate_dirs << File.join(File.expand_path('~'), 'bc_pdf_importer_logs')
+        rescue StandardError
+          # ignore home expansion failure
+        end
+
+        candidate_dirs.uniq.each do |dir|
+          begin
+            FileUtils.mkdir_p(dir)
+            path = File.join(dir, 'last_import.log')
+            file = File.open(path, 'w')
+            file.sync = true
+            @log_file = file
+            @log_path = path
+            write_line("--- PDF Vector Importer log #{Time.now.strftime('%Y-%m-%d %H:%M:%S')} ---")
+            write_line("[INFO] Logger: path=#{@log_path}")
+            break
+          rescue StandardError
+            @log_file = nil
+            @log_path = nil
+          end
         end
       end
 
@@ -34,7 +64,7 @@ module BlueCollarSystems
         entry = "[WARN] #{context}: #{msg}"
         @warnings << entry
         puts entry if @debug
-        @log_file.puts(entry) if @log_file
+        write_line(entry)
       end
 
       def self.error(context, msg, exception = nil)
@@ -42,18 +72,18 @@ module BlueCollarSystems
         entry += " (#{exception.class}: #{exception.message})" if exception
         @errors << entry
         puts entry if @debug
-        @log_file.puts(entry) if @log_file
+        write_line(entry)
         if exception && exception.backtrace
           bt = "  " + exception.backtrace.first(3).join("\n  ")
           puts bt if @debug
-          @log_file.puts(bt) if @log_file
+          write_line(bt)
         end
       end
 
       def self.info(context, msg)
         entry = "[INFO] #{context}: #{msg}"
         puts entry if @debug
-        @log_file.puts(entry) if @log_file
+        write_line(entry)
       end
 
       def self.flush_log
@@ -77,8 +107,34 @@ module BlueCollarSystems
 
       # Returns the path to the log file (for user diagnosis)
       def self.log_path
-        @log_file ? @log_file.path : nil
+        @log_path
       end
+
+      def self.write_line(entry)
+        return unless @log_file
+        @log_file.puts(entry)
+      rescue StandardError
+        @log_file = nil
+      end
+      private_class_method :write_line
+
+      def self.close_log
+        return unless @log_file
+        begin
+          @log_file.flush
+        rescue StandardError
+          # ignore flush errors while closing
+        end
+        begin
+          @log_file.close unless @log_file.closed?
+        rescue StandardError
+          # ignore close errors
+        end
+      ensure
+        @log_file = nil
+        @log_path = nil
+      end
+      private_class_method :close_log
     end
   end
 end

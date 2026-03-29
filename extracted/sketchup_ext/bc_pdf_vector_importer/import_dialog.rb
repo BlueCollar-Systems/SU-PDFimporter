@@ -40,7 +40,7 @@ module BlueCollarSystems
 
       YES_NO       = 'Yes|No'
       PRESET_NAMES = PRESETS.keys.join('|')
-      TEXT_MODES   = 'Labels|Geometry|No text'
+      TEXT_MODES   = 'Labels|3D Text|Geometry|No text'
       HATCH_MODES  = 'Import|Group|Skip'
 
       # Phase 2 dropdown choices
@@ -209,7 +209,10 @@ module BlueCollarSystems
         }.join
 
         text_opts = [
-          ['Labels', 'Labels'], ['Geometry', 'Geometry'], ['No text', 'No text']
+          ['Labels', 'Labels'],
+          ['3D Text', '3D Text'],
+          ['Geometry', 'Geometry'],
+          ['No text', 'No text']
         ].map { |v, label|
           sel = v == text_mode ? ' selected' : ''
           "<option value=\"#{v}\"#{sel}>#{label}</option>"
@@ -255,7 +258,7 @@ module BlueCollarSystems
           "<option value=\"Yes\"#{yes}>Yes</option><option value=\"No\"#{no}>No</option>"
         }
 
-        text_opts = [['Labels','Labels'],['Geometry','Geometry'],['No text','No text']].map{|v,lbl|
+        text_opts = [['Labels','Labels'],['3D Text','3D Text'],['Geometry','Geometry'],['No text','No text']].map{|v,lbl|
           sel = d[:text_mode] == v ? ' selected' : ''
           "<option value=\"#{v}\"#{sel}>#{lbl}</option>"
         }.join
@@ -477,9 +480,18 @@ module BlueCollarSystems
                 else :auto
                 end
 
-        text_mode   = (raw[:text_mode] || 'Labels').to_s
-        import_text = !(text_mode =~ /No text/i)
-        use_3d_text = !!(text_mode =~ /Geometry/i)
+        text_mode_raw = (raw[:text_mode] || 'Labels').to_s
+        text_mode = if text_mode_raw =~ /No text/i
+                      :none
+                    elsif text_mode_raw =~ /\A3D\s*Text\z/i
+                      :text3d
+                    elsif text_mode_raw =~ /Geometry/i
+                      :geometry
+                    else
+                      :labels
+                    end
+        import_text = (text_mode != :none)
+        use_3d_text = (text_mode == :text3d)
 
         hatch = case (raw[:hatch_mode] || 'Group')
                 when /Skip/i  then :skip
@@ -501,6 +513,7 @@ module BlueCollarSystems
           detect_arcs:      (raw[:detect_arcs] || 'Yes') == 'Yes',
           map_dashes:       (raw[:map_dashes] || 'Yes') == 'Yes',
           import_text:      import_text,
+          text_mode:        text_mode,
           use_3d_text:      use_3d_text,
           hatch_mode:       hatch,
           raster_fallback:  (raw[:raster_fallback] || 'Yes') == 'Yes',
