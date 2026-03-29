@@ -44,7 +44,7 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 
 ## Installation
 
-1. Download `bc_pdf_vector_importer_v350.rbz`
+1. Download `bc_pdf_vector_importer_v3.5.0.rbz`
 2. In SketchUp: **Window > Extension Manager > Install Extension**
 3. Select the `.rbz` file
 4. Restart SketchUp if prompted
