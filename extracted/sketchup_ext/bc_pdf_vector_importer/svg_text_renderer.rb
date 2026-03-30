@@ -36,15 +36,26 @@ module BlueCollarSystems
         svg_path = File.join(Dir.tmpdir,
           "bc_svg_#{Process.pid}_#{Time.now.to_i}_#{rand(100000)}.svg")
 
+        use_cropbox = false
+        begin
+          if media_box.is_a?(Array) && media_box.length >= 4 &&
+             svg_page_box.is_a?(Array) && svg_page_box.length >= 4
+            use_cropbox = svg_page_box.zip(media_box).any? { |a, b| (a.to_f - b.to_f).abs > 0.01 }
+          end
+        rescue StandardError => e
+          Logger.warn("SvgTextRenderer", "cropbox compare failed: #{e.message}")
+        end
+
         args = [
           exe.to_s,
           '-svg',
+          (use_cropbox ? '-cropbox' : nil),
           '-f', page_num.to_i.to_s,
           '-l', page_num.to_i.to_s,
           '--',
           pdf_path.to_s,
           svg_path.to_s
-        ]
+        ].compact
         run = CommandRunner.run(
           args,
           timeout_s: 90,

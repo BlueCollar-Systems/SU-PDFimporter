@@ -342,7 +342,7 @@ module BlueCollarSystems
           <div class="row2">
             <div><label>Force Raster</label>
               <select id="force_raster">#{yn.call(:force_raster)}</select></div>
-            <div><label>Raster DPI (150&ndash;600)</label>
+            <div><label>Raster DPI (200&ndash;600)</label>
               <input type="text" id="raster_dpi" value="#{esc(d[:raster_dpi])}" placeholder="300"></div>
           </div>
           <div class="actions">
@@ -398,7 +398,7 @@ module BlueCollarSystems
           "Pages:","Scale Factor:","Curve Smoothness (4=fast, 48=smooth):",
           "Import Text:","Hatchings:","Rebuild Arcs from Curves:",
           "Map Dashed/Hidden Lines:","Import Filled Regions:",
-          "Auto-Clean Geometry:","Force Raster Image (skip vectors):","Raster DPI (150-600):",
+          "Auto-Clean Geometry:","Force Raster Image (skip vectors):","Raster DPI (200-600):",
           "Arc Mode:","Cleanup Level:","Lineweight Handling:","Grouping Mode:"
         ]
         defaults = [
@@ -518,7 +518,7 @@ module BlueCollarSystems
           hatch_mode:       hatch,
           raster_fallback:  (raw[:raster_fallback] || 'Yes') == 'Yes',
           force_raster:     (raw[:force_raster] || 'No') == 'Yes',
-          raster_dpi:       [[((raw[:raster_dpi] || '300').to_i), 150].max, 600].min,
+          raster_dpi:       [[((raw[:raster_dpi] || '300').to_i), 200].max, 600].min,
           cleanup_geometry: (raw[:cleanup_geometry] || 'Yes') == 'Yes',
           recognition_mode: recog,
           arc_mode:         (raw[:arc_mode] || 'Auto').to_s,

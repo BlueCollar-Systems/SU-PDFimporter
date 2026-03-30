@@ -194,6 +194,7 @@ module BlueCollarSystems
         Logger.warn("Pipeline", "Force-raster mode at #{dpi} DPI")
         model.start_operation("Import PDF Raster", true)
         media_box = [0, 0, 612, 792]  # default; overridden per-page below
+        crop_box = nil
         import_start = Time.now
         # Try to get actual page size from parser
         begin
@@ -202,11 +203,17 @@ module BlueCollarSystems
           if p.page_count > 0
             pg = p.pages.first
             media_box = pg[:media_box] if pg && pg[:media_box]
+            if pg && pg[:crop_box].is_a?(Array) && pg[:crop_box].length >= 4
+              crop_box = pg[:crop_box]
+            end
           end
         rescue StandardError => e
           Logger.warn("Pipeline", "Could not read page size: #{e.message}")
         end
-        raster_ok = import_page_as_raster(model, path, 1, media_box, opts, import_start)
+        raster_box = crop_box || media_box
+        raster_ok = import_page_as_raster(
+          model, path, 1, media_box, opts, import_start, 0.0, raster_box
+        )
         if raster_ok
           model.commit_operation
           return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
@@ -312,7 +319,8 @@ module BlueCollarSystems
         Logger.info("Pipeline",
           "Page #{page_num}: text_mode=#{requested_text_mode}, media_box=#{media_box.inspect}, " \
           "crop_box=#{crop_box ? crop_box.inspect : 'nil'}, text_offset_pts=(#{text_offset_x.round(3)},#{text_offset_y.round(3)})")
-        curr_page_height_in = (media_box[3].to_f - media_box[1].to_f).abs * (1.0 / 72.0) * opts[:scale].to_f
+        stack_box = svg_page_box
+        curr_page_height_in = (stack_box[3].to_f - stack_box[1].to_f).abs * (1.0 / 72.0) * opts[:scale].to_f
         curr_page_height_in = 11.0 * opts[:scale].to_f if curr_page_height_in <= 0.0
         page_y_offset = running_y_offset
         streams = raw[:content_streams]
@@ -320,7 +328,9 @@ module BlueCollarSystems
           # No content streams — try raster fallback instead of skipping
           if opts[:raster_fallback]
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — No streams, trying raster... [#{elapsed}s]"
-            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+            raster_ok = import_page_as_raster(
+              model, path, page_num, media_box, opts, import_start, page_y_offset, svg_page_box
+            )
             if raster_ok
               stats[:pages] += 1
               stats[:raster_fallback_used] = true
@@ -349,7 +359,9 @@ module BlueCollarSystems
 
           if opts[:raster_fallback]
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Fill-art flood, rendering raster... [#{(Time.now - import_start).round(1)}s]"
-            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+            raster_ok = import_page_as_raster(
+              model, path, page_num, media_box, opts, import_start, page_y_offset, svg_page_box
+            )
             if raster_ok
               stats[:pages] += 1
               stats[:raster_fallback_used] = true
@@ -369,13 +381,27 @@ module BlueCollarSystems
         text_items = []
         if opts[:import_text]
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Extracting text... [#{(Time.now - import_start).round(1)}s]"
-          text_items = ExternalTextExtractor.extract(path, page_num,
-            offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
-          text_source = :external
-          if text_items.nil? || text_items.empty?
+          # 3D text alignment is most stable when we use baseline-aware
+          # coordinates from content streams first, then fall back to bbox text.
+          prefer_internal_text = (requested_text_mode == :text3d)
+          if prefer_internal_text
             font_maps = parser.page_font_maps(page_num)
             text_items = TextParser.new(streams, font_maps).parse
             text_source = :internal
+            if text_items.nil? || text_items.empty?
+              text_items = ExternalTextExtractor.extract(path, page_num,
+                offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
+              text_source = :external
+            end
+          else
+            text_items = ExternalTextExtractor.extract(path, page_num,
+              offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
+            text_source = :external
+            if text_items.nil? || text_items.empty?
+              font_maps = parser.page_font_maps(page_num)
+              text_items = TextParser.new(streams, font_maps).parse
+              text_source = :internal
+            end
           end
           Logger.info("Pipeline", "Page #{page_num}: text extractor=#{text_source}, items=#{text_items ? text_items.length : 0}")
         end
@@ -387,7 +413,9 @@ module BlueCollarSystems
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Text-heavy page, using raster fallback... [#{(Time.now - import_start).round(1)}s]"
           Logger.warn("Pipeline",
             "Page #{page_num}: text-dominant content (paths=#{paths.length}, text=#{text_items.length}) — raster fallback")
-          raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+          raster_ok = import_page_as_raster(
+            model, path, page_num, media_box, opts, import_start, page_y_offset, svg_page_box
+          )
           if raster_ok
             stats[:pages] += 1
             stats[:raster_fallback_used] = true
@@ -400,7 +428,9 @@ module BlueCollarSystems
         if paths.empty? && text_items.empty?
           if opts[:raster_fallback]
             Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Rendering raster image... [#{(Time.now - import_start).round(1)}s]"
-            raster_ok = import_page_as_raster(model, path, page_num, media_box, opts, import_start, page_y_offset)
+            raster_ok = import_page_as_raster(
+              model, path, page_num, media_box, opts, import_start, page_y_offset, svg_page_box
+            )
             if raster_ok
               stats[:pages] += 1
               stats[:edges] += 0
@@ -621,21 +651,39 @@ module BlueCollarSystems
     # ================================================================
     # RASTER FALLBACK — render scanned page as positioned image
     # ================================================================
-    def self.import_page_as_raster(model, pdf_path, page_num, media_box, opts, import_start, y_offset = 0.0)
+    def self.import_page_as_raster(model, pdf_path, page_num, media_box, opts, import_start, y_offset = 0.0, render_box = nil)
       exe = safe_find_pdftocairo
       return false unless exe
 
       dpi = opts[:raster_dpi] || 300
-      page_w_pts = (media_box[2] - media_box[0]).abs
-      page_h_pts = (media_box[3] - media_box[1]).abs
+      # Render/placement box (usually CropBox when available, else MediaBox).
+      render_box = media_box unless render_box.is_a?(Array) && render_box.length >= 4
+      media_min_x = media_box[0].to_f
+      media_min_y = media_box[1].to_f
+      render_min_x = render_box[0].to_f
+      render_min_y = render_box[1].to_f
+      page_w_pts = (render_box[2] - render_box[0]).abs
+      page_h_pts = (render_box[3] - render_box[1]).abs
       page_w_pts = 612.0 if page_w_pts < 1
       page_h_pts = 792.0 if page_h_pts < 1
+
+      use_cropbox = false
+      begin
+        if media_box.is_a?(Array) && media_box.length >= 4 &&
+           render_box.is_a?(Array) && render_box.length >= 4
+          use_cropbox = render_box.zip(media_box).any? { |a, b| (a.to_f - b.to_f).abs > 0.01 }
+        end
+      rescue StandardError => e
+        Logger.warn("Raster", "cropbox compare failed: #{e.message}")
+      end
 
       # Render page to PNG
       png_path = File.join(Dir.tmpdir,
         "bc_raster_#{Process.pid}_#{Time.now.to_i}_p#{page_num}.png")
 
-      args = [exe, '-png', '-singlefile', '-r', dpi.to_s,
+      args = [exe, '-png', '-singlefile', '-r', dpi.to_s]
+      args << '-cropbox' if use_cropbox
+      args += [
               '-f', page_num.to_s, '-l', page_num.to_s,
               pdf_path, png_path.sub(/\.png$/, '')]
       run = CommandRunner.run(
@@ -665,9 +713,11 @@ module BlueCollarSystems
         # Image size in inches = page pts / 72
         img_w = page_w_pts / 72.0 * scale
         img_h = page_h_pts / 72.0 * scale
+        box_offset_x = (render_min_x - media_min_x) / 72.0 * scale
+        box_offset_y = (render_min_y - media_min_y) / 72.0 * scale
 
         # Match vector page stacking so raster fallback pages do not overlap.
-        pt = Geom::Point3d.new(0, y_offset.to_f, 0)
+        pt = Geom::Point3d.new(box_offset_x, y_offset.to_f + box_offset_y, 0)
         begin
           # add_image available in SketchUp 2017+
           img = model.active_entities.add_image(actual_png, pt, img_w, img_h)
@@ -678,7 +728,9 @@ module BlueCollarSystems
             rescue StandardError => e
               Logger.warn("Raster", "Image layer assignment failed: #{e.message}")
             end
+            box_msg = use_cropbox ? "cropbox" : "mediabox"
             Sketchup.status_text = "PDF Import — Page #{page_num} — Raster image placed at #{dpi} DPI [#{(Time.now - import_start).round(1)}s]"
+            Logger.info("Raster", "Page #{page_num}: placed #{box_msg} raster #{img_w.round(3)}x#{img_h.round(3)} in at (#{pt.x.round(3)},#{pt.y.round(3)})")
             return true
           end
         rescue StandardError => e
