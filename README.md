@@ -3,7 +3,7 @@
 **BUILT. NOT BOUGHT.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-3.6.2-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-3.6.3-green.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-SketchUp%202017%2B-orange.svg)]()
 [![Ruby](https://img.shields.io/badge/Ruby-2.2%2B-red.svg)]()
 
@@ -44,7 +44,7 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 
 ## Installation
 
-1. Download `bc_pdf_vector_importer_v3.5.0.rbz`
+1. Download `bc_pdf_vector_importer_v3.6.3.rbz`
 2. In SketchUp: **Window > Extension Manager > Install Extension**
 3. Select the `.rbz` file
 4. Restart SketchUp if prompted
