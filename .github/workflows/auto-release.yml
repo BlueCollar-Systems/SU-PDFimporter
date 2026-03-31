@@ -1,0 +1,70 @@
+name: auto-release
+
+on:
+  push:
+    branches: [main]
+
+# Don't release on version-bump commits made by this workflow
+# (detected by commit message prefix)
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Skip if the push was the auto-bump commit itself
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version to')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read and bump version
+        id: version
+        run: |
+          # Read current version from root loader
+          current=$(grep -oP "PLUGIN_VERSION\s*=\s*'\K[^']+" extracted/sketchup_ext/bc_pdf_vector_importer.rb)
+          echo "current=$current"
+
+          # Split and bump patch
+          IFS='.' read -r major minor patch <<< "$current"
+          new_patch=$((patch + 1))
+          new_version="${major}.${minor}.${new_patch}"
+          echo "new=$new_version"
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+
+          # Update version in source
+          sed -i "s/PLUGIN_VERSION  = '${current}'/PLUGIN_VERSION  = '${new_version}'/" extracted/sketchup_ext/bc_pdf_vector_importer.rb
+          sed -i "s/Version-${current}-/Version-${new_version}-/" README.md
+
+      - name: Build .rbz
+        run: |
+          pip install --quiet setuptools
+          python build_release.py
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add extracted/sketchup_ext/bc_pdf_vector_importer.rb README.md
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+          git push
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="v${{ steps.version.outputs.version }}"
+          RBZ=$(ls bc_pdf_vector_importer_v*.rbz)
+          gh release create "$VERSION" \
+            --title "$VERSION — PDF Vector Importer for SketchUp" \
+            --notes "Automated release from latest \`main\` commit.
+
+          **Install:** Download \`${RBZ}\` below, then in SketchUp: **Window > Extension Manager > Install Extension**." \
+            --latest \
+            "$RBZ"
