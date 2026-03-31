@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="v${{ steps.version.outputs.version }}"
-          RBZ=$(ls bc_pdf_vector_importer_v*.rbz)
+          RBZ="bc_pdf_vector_importer_v${{ steps.version.outputs.version }}.rbz"
           gh release create "$VERSION" \
             --title "$VERSION — PDF Vector Importer for SketchUp" \
             --notes "Automated release from latest \`main\` commit.
