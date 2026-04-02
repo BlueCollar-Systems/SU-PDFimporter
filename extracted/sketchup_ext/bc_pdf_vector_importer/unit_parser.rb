@@ -5,7 +5,7 @@
 #
 # Mirrors the FreeCAD version's parse_dimension_mm but outputs inches.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

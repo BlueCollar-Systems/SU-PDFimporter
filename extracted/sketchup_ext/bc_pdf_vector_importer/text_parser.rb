@@ -3,7 +3,7 @@
 # Handles BT/ET text blocks, Tm/Td positioning, Tj/TJ string operators,
 # and font size tracking. Reconstructs stacked fractions to inline.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

@@ -6,7 +6,7 @@
 # Rule 1: Parser modules must not know about domain-specific logic.
 # This module only normalizes coordinates and classifies geometry types.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

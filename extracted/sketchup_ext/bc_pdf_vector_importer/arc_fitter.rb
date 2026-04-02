@@ -5,7 +5,7 @@
 #
 # Matches the FreeCAD version's _circle_fit and _polyline_edges_to_arcs.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

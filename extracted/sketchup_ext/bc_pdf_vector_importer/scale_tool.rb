@@ -6,7 +6,7 @@
 #
 # Mirrors the FreeCAD PDFScaleTool functionality.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

@@ -5,7 +5,7 @@
 # Uses adaptive subdivision for accuracy: subdivides more in
 # areas of high curvature, less in straight sections.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

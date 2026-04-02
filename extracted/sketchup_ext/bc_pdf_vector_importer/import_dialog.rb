@@ -373,7 +373,7 @@ module BlueCollarSystems
       end
 
       def self.esc(str)
-        str.to_s.gsub('&','&amp;').gsub('"','&quot;').gsub('<','&lt;').gsub('>','&gt;')
+        str.to_s.gsub('&','&amp;').gsub('"','&quot;').gsub("'",'&#39;').gsub('<','&lt;').gsub('>','&gt;')
       end
 
       # ---- UI.inputbox fallbacks (headless / pre-2017 SU) ----------

@@ -4,7 +4,7 @@
 # and tracks BDC/BMC/EMC marked content nesting in content streams
 # so entities can be assigned to the correct SketchUp Tags.
 #
-# Copyright 2024 BlueCollar Systems — BUILT. NOT BOUGHT.
+# Copyright 2024-2026 BlueCollar Systems — BUILT. NOT BOUGHT.
 
 module BlueCollarSystems
   module PDFVectorImporter

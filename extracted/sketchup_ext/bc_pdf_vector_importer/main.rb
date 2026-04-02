@@ -867,14 +867,6 @@ module BlueCollarSystems
           "BUILT. NOT BOUGHT.")
       }
 
-      if defined?(Sketchup::Importer) && defined?(PDFFileImporter)
-        begin
-          Sketchup.register_importer(PDFFileImporter.new)
-        rescue StandardError => e
-          puts "PDF importer registration: #{e.message}" if $VERBOSE
-        end
-      end
-
       @loaded = true
     end
 
