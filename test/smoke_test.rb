@@ -154,7 +154,7 @@ forbidden_rescue_hits = []
 core_rb_files.each do |f|
   rel = f.sub("#{REPO_ROOT}/", '').sub("#{REPO_ROOT}\\", '')
   File.readlines(f, chomp: true).each_with_index do |line, idx|
-    if line.match?(/\brescue\s+nil\b/) || line.match?(/\brescue\s*=>/)
+    if line =~ /\brescue\s+nil\b/ || line =~ /\brescue\s*=>/
       forbidden_rescue_hits << "#{rel}:#{idx + 1}: #{line.strip}"
     end
   end
