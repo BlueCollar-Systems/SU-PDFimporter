@@ -25,28 +25,46 @@ module BlueCollarSystems
             "bc_pdf_text_bbox_#{Process.pid}_#{Time.now.to_i}_#{rand(100000)}.html"
           )
 
-          args = [
+          base_args = [
             exe.to_s,
             '-f', page_number.to_i.to_s,
             '-l', page_number.to_i.to_s,
-            '-bbox-layout',
-            # Keep coordinate space consistent with pdftocairo SVG rendering.
-            # Without -cropbox, pdftotext emits MediaBox coordinates on PDFs
-            # where CropBox != MediaBox, which introduces text drift.
-            '-cropbox',
-            pdf_path.to_s,
-            out_html.to_s
+            '-bbox-layout'
+          ]
+          # Prefer crop box for coordinate fidelity, but some pdftotext builds
+          # reject -cropbox with -bbox-layout. Retry without -cropbox.
+          arg_variants = [
+            base_args + ['-cropbox', pdf_path.to_s, out_html.to_s],
+            base_args + [pdf_path.to_s, out_html.to_s]
           ]
 
-          run = CommandRunner.run(
-            args,
-            timeout_s: 45,
-            context: 'ExternalTextExtractor.pdftotext'
-          )
-          return [] unless run[:ok] && File.exist?(out_html)
+          arg_variants.each_with_index do |args, idx|
+            begin
+              File.delete(out_html) if File.exist?(out_html)
+            rescue StandardError
+              # best-effort cleanup
+            end
 
-          html = File.read(out_html)
-          parse_bbox_html(html, opts)
+            run = CommandRunner.run(
+              args,
+              timeout_s: 45,
+              context: 'ExternalTextExtractor.pdftotext'
+            )
+            break if run[:timed_out]
+            next unless run[:ok] && File.exist?(out_html)
+
+            if idx == 1
+              Logger.warn(
+                'ExternalTextExtractor',
+                "pdftotext -cropbox unavailable on page #{page_number}; using media box fallback"
+              )
+            end
+
+            html = File.read(out_html, encoding: 'UTF-8')
+            return parse_bbox_html(html, opts)
+          end
+
+          []
         rescue StandardError => e
           begin
             Logger.warn('ExternalTextExtractor', "pdftotext fallback: #{e.message}")
@@ -80,6 +98,12 @@ module BlueCollarSystems
             )
           end
           candidates << 'C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdftotext.exe'
+          # FreeCAD bundled (matches pdftocairo search)
+          candidates << File.join('C:', 'Program Files', 'FreeCAD 1.1', 'bin', 'pdftotext.exe')
+          # Glob patterns (matches pdftocairo search)
+          Dir.glob('C:/Program Files/FreeCAD*/bin/pdftotext.exe').each { |p| candidates << p }
+          Dir.glob('C:/poppler*/bin/pdftotext.exe').each { |p| candidates << p }
+          Dir.glob('C:/tools/poppler*/bin/pdftotext.exe').each { |p| candidates << p }
           candidates.each { |p| return p if File.exist?(p) }
 
           # 3) PATH
@@ -155,7 +179,11 @@ module BlueCollarSystems
             )
           end
 
-          stitch_fragmented_dimensions(items)
+          if opts[:strict_text_fidelity]
+            items
+          else
+            stitch_fragmented_dimensions(items)
+          end
         end
 
         def attr_value(attrs, name)

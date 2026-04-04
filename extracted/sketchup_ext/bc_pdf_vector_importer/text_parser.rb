@@ -22,10 +22,13 @@ module BlueCollarSystems
       # Common structural drawing fraction denominators
       VALID_DENOMS = [2, 4, 8, 16, 32, 64].freeze
 
-      def initialize(streams, font_maps = nil)
+      def initialize(streams, font_maps = nil, opts = {})
         @streams = streams
         @text_items = []
         @font_maps = {}
+        # Strict mode keeps raw text spans as close to source as possible.
+        # Default remains false to preserve legacy behavior.
+        @strict_text_fidelity = !!opts[:strict_text_fidelity]
 
         (font_maps || {}).each do |k, v|
           key = k.to_s
@@ -43,13 +46,18 @@ module BlueCollarSystems
         end
 
         # Post-process text items.
-        # Reconstruct stacked fractions before run-merge so slash forms survive.
-        @text_items = reconstruct_fractions(@text_items)
-        @text_items = merge_text_runs(@text_items)
-        @text_items = fix_merged_fractions(@text_items)
-        @text_items = dedupe_text_items(@text_items)
-        @text_items = quality_filter(@text_items)
-        @text_items = suppress_overlaps(@text_items)
+        if @strict_text_fidelity
+          # Keep exact extracted spans; only remove exact duplicates.
+          @text_items = dedupe_text_items(@text_items)
+        else
+          # Reconstruct stacked fractions before run-merge so slash forms survive.
+          @text_items = reconstruct_fractions(@text_items)
+          @text_items = merge_text_runs(@text_items)
+          @text_items = fix_merged_fractions(@text_items)
+          @text_items = dedupe_text_items(@text_items)
+          @text_items = quality_filter(@text_items)
+          @text_items = suppress_overlaps(@text_items)
+        end
         @text_items
       end
 

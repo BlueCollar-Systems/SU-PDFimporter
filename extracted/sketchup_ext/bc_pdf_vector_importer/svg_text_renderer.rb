@@ -46,24 +46,47 @@ module BlueCollarSystems
           Logger.warn("SvgTextRenderer", "cropbox compare failed: #{e.message}")
         end
 
-        args = [
+        base_args = [
           exe.to_s,
           '-svg',
-          (use_cropbox ? '-cropbox' : nil),
           '-f', page_num.to_i.to_s,
           '-l', page_num.to_i.to_s,
           '--',
           pdf_path.to_s,
           svg_path.to_s
-        ].compact
-        run = CommandRunner.run(
-          args,
-          timeout_s: 90,
-          context: 'SvgTextRenderer.pdftocairo'
-        )
-        return nil unless run[:ok] && File.exist?(svg_path)
+        ]
+        arg_variants = []
+        arg_variants << [exe.to_s, '-svg', '-cropbox'] + base_args[2..-1] if use_cropbox
+        arg_variants << base_args
 
-        svg = File.read(svg_path)
+        used_cropbox_fallback = false
+        render_ok = false
+        arg_variants.each_with_index do |args, idx|
+          begin
+            File.delete(svg_path) if File.exist?(svg_path)
+          rescue StandardError
+            # best-effort cleanup
+          end
+
+          run = CommandRunner.run(
+            args,
+            timeout_s: 90,
+            context: 'SvgTextRenderer.pdftocairo'
+          )
+          if run[:ok] && File.exist?(svg_path)
+            used_cropbox_fallback = (idx == 1 && use_cropbox)
+            render_ok = true
+            break
+          end
+          break if run[:timed_out]
+        end
+        return nil unless render_ok
+        if used_cropbox_fallback
+          Logger.warn("SvgTextRenderer",
+            "Page #{page_num}: pdftocairo -cropbox unavailable; used media box SVG fallback")
+        end
+
+        svg = File.read(svg_path, encoding: 'UTF-8')
         glyphs = parse_glyph_defs(svg)
         placements = parse_use_placements(svg)
         return { edges: 0, glyphs: 0 } if placements.empty?

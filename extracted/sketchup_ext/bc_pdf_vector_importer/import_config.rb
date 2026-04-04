@@ -64,6 +64,7 @@ module BlueCollarSystems
           scale: '1.0', bezier_segments: '8', import_as: 'Edges Only',
           import_fills: 'No', group_by_color: 'No', detect_arcs: 'No',
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
           force_raster: 'No', raster_dpi: '300',
@@ -74,6 +75,7 @@ module BlueCollarSystems
           scale: '1.0', bezier_segments: '24', import_as: 'Edges and Faces',
           import_fills: 'Yes', group_by_color: 'Yes', detect_arcs: 'Yes',
           map_dashes: 'Yes', text_mode: 'Geometry', hatch_mode: 'Group',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'Yes', recognition_mode: 'None',
           merge_tolerance: '0.001', units: 'Inches',
           force_raster: 'No', raster_dpi: '300',
@@ -84,6 +86,7 @@ module BlueCollarSystems
           scale: '1.0', bezier_segments: '8', import_as: 'Edges Only',
           import_fills: 'No', group_by_color: 'No', detect_arcs: 'No',
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
           force_raster: 'Yes', raster_dpi: '300',
@@ -100,7 +103,7 @@ module BlueCollarSystems
                     :detect_arcs, :map_dashes, :import_text, :use_3d_text,
                     :hatch_mode, :raster_fallback, :force_raster,
                     :raster_dpi, :cleanup_geometry, :recognition_mode,
-                    :text_mode, :units,
+                    :text_mode, :strict_text_fidelity, :units,
                     # Phase 2 additions
                     :arc_mode, :cleanup_level, :lineweight_mode, :grouping_mode
 
@@ -119,6 +122,7 @@ module BlueCollarSystems
         @detect_arcs      = attrs[:detect_arcs]      || 'Yes'
         @map_dashes       = attrs[:map_dashes]       || 'Yes'
         @text_mode        = attrs[:text_mode]        || 'Geometry'
+        @strict_text_fidelity = attrs[:strict_text_fidelity] || 'No'
         @hatch_mode       = attrs[:hatch_mode]       || 'Group'
         @raster_fallback  = attrs[:raster_fallback]  || 'Yes'
         @force_raster     = attrs[:force_raster]     || 'No'
@@ -156,7 +160,8 @@ module BlueCollarSystems
           group_per_page: @group_per_page, merge_tolerance: @merge_tolerance,
           import_fills: @import_fills, group_by_color: @group_by_color,
           detect_arcs: @detect_arcs, map_dashes: @map_dashes,
-          text_mode: @text_mode, hatch_mode: @hatch_mode,
+          text_mode: @text_mode, strict_text_fidelity: @strict_text_fidelity,
+          hatch_mode: @hatch_mode,
           raster_fallback: @raster_fallback, force_raster: @force_raster,
           raster_dpi: @raster_dpi, cleanup_geometry: @cleanup_geometry,
           recognition_mode: @recognition_mode, units: @units,
