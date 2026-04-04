@@ -153,9 +153,13 @@ forbidden_rescue_hits = []
 
 core_rb_files.each do |f|
   rel = f.sub("#{REPO_ROOT}/", '').sub("#{REPO_ROOT}\\", '')
-  File.readlines(f, chomp: true).each_with_index do |line, idx|
-    if line =~ /\brescue\s+nil\b/ || line =~ /\brescue\s*=>/
-      forbidden_rescue_hits << "#{rel}:#{idx + 1}: #{line.strip}"
+  File.open(f, 'rb') do |io|
+    io.each_line.with_index do |raw_line, idx|
+      line = raw_line.force_encoding('UTF-8')
+      line = line.encode('UTF-8', 'binary', invalid: :replace, undef: :replace)
+      if line =~ /\brescue\s+nil\b/ || line =~ /\brescue\s*=>/
+        forbidden_rescue_hits << "#{rel}:#{idx + 1}: #{line.strip}"
+      end
     end
   end
 end
