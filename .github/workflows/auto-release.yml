@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Read and bump version
+      - name: Read version
         id: version
         run: |
           python - <<'PY'
@@ -37,56 +37,22 @@ jobs:
           import re
 
           loader = pathlib.Path("extracted/sketchup_ext/bc_pdf_vector_importer.rb")
-          readme = pathlib.Path("README.md")
 
           loader_text = loader.read_text(encoding="utf-8")
           match = re.search(r"PLUGIN_VERSION\s*=\s*'(\d+)\.(\d+)\.(\d+)'", loader_text)
           if not match:
               raise SystemExit("Could not find PLUGIN_VERSION in extracted/sketchup_ext/bc_pdf_vector_importer.rb")
 
-          major, minor, patch = map(int, match.groups())
-          new_version = f"{major}.{minor}.{patch + 1}"
-
-          loader_text = re.sub(
-              r"(PLUGIN_VERSION\s*=\s*')(\d+\.\d+\.\d+)(')",
-              rf"\g<1>{new_version}\3",
-              loader_text,
-              count=1,
-          )
-          loader.write_text(loader_text, encoding="utf-8")
-
-          readme_text = readme.read_text(encoding="utf-8")
-          readme_text = re.sub(
-              r"(Version-)(\d+\.\d+\.\d+)(-green\.svg)",
-              rf"\g<1>{new_version}\3",
-              readme_text,
-              count=1,
-          )
-          readme_text = re.sub(
-              r"(Download `bc_pdf_vector_importer_v)(\d+\.\d+\.\d+)(\.rbz`)",
-              rf"\g<1>{new_version}\3",
-              readme_text,
-              count=1,
-          )
-          readme.write_text(readme_text, encoding="utf-8")
+          version = ".".join(match.groups())
 
           out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
-          out.write_text(f"version={new_version}\n", encoding="utf-8")
+          out.write_text(f"version={version}\n", encoding="utf-8")
           PY
 
       - name: Build .rbz
         run: python build_release.py
 
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add extracted/sketchup_ext/bc_pdf_vector_importer.rb README.md
-          git diff --cached --quiet && echo "No version changes to commit" && exit 0
-          git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
-          git push
-
-      - name: Create or update release
+      - name: Create release if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -95,7 +61,8 @@ jobs:
           RBZ="bc_pdf_vector_importer_v${{ steps.version.outputs.version }}.rbz"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$RBZ" --clobber
+            echo "Release $TAG already exists; skipping."
+            exit 0
           else
             gh release create "$TAG" \
               --title "$TAG — PDF Vector Importer for SketchUp" \
