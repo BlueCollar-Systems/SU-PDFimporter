@@ -33,32 +33,72 @@ module BlueCollarSystems
         @bezier_segments = opts[:bezier_segments] || 16
         @cleanup_geometry = opts[:cleanup_geometry] || false
         @merge_tolerance = opts[:merge_tolerance] || 0.001
-        origin_x = media_box[0].to_f
-        origin_y = media_box[1].to_f
-        vb_w = (media_box[2] - media_box[0]).abs.to_f
-        vb_h = (media_box[3] - media_box[1]).abs.to_f
+        render_box = opts[:svg_page_box] || media_box
+        media_min_x = media_box[0].to_f
+        media_min_y = media_box[1].to_f
+        render_min_x = render_box[0].to_f
+        render_min_y = render_box[1].to_f
+        box_offset_x_in = (render_min_x - media_min_x) * PDF_PT_TO_INCH * scale.to_f
+        box_offset_y_in = (render_min_y - media_min_y) * PDF_PT_TO_INCH * scale.to_f
+        vb_w = (render_box[2] - render_box[0]).abs.to_f
+        vb_h = (render_box[3] - render_box[1]).abs.to_f
         vb_w = 2592.0 if vb_w < 1
         vb_h = 1728.0 if vb_h < 1
 
         # Generate SVG
         svg_path = File.join(Dir.tmpdir,
           "bc_geo_#{Process.pid}_#{Time.now.to_i}_#{rand(100000)}.svg")
-        args = [
+        use_cropbox = false
+        begin
+          if media_box.is_a?(Array) && media_box.length >= 4 &&
+             render_box.is_a?(Array) && render_box.length >= 4
+            use_cropbox = render_box.zip(media_box).any? { |a, b| (a.to_f - b.to_f).abs > 0.01 }
+          end
+        rescue StandardError => e
+          Logger.warn("SvgGeometryRenderer", "cropbox compare failed: #{e.message}")
+        end
+
+        base_args = [
           exe.to_s,
           '-svg',
           '-f', page_num.to_i.to_s,
           '-l', page_num.to_i.to_s,
+          '--',
           pdf_path.to_s,
           svg_path.to_s
         ]
-        run = CommandRunner.run(
-          args,
-          timeout_s: 120,
-          context: 'SvgGeometryRenderer.pdftocairo'
-        )
-        return nil unless run[:ok] && File.exist?(svg_path)
+        arg_variants = []
+        arg_variants << [exe.to_s, '-svg', '-cropbox'] + base_args[2..-1] if use_cropbox
+        arg_variants << base_args
 
-        svg = File.read(svg_path)
+        used_cropbox_fallback = false
+        render_ok = false
+        arg_variants.each_with_index do |args, idx|
+          begin
+            File.delete(svg_path) if File.exist?(svg_path)
+          rescue StandardError
+            # best-effort cleanup
+          end
+
+          run = CommandRunner.run(
+            args,
+            timeout_s: 120,
+            context: 'SvgGeometryRenderer.pdftocairo'
+          )
+          if run[:ok] && File.exist?(svg_path)
+            used_cropbox_fallback = (idx == 1 && use_cropbox)
+            render_ok = true
+            break
+          end
+          break if run[:timed_out]
+        end
+        return nil unless render_ok
+        if used_cropbox_fallback
+          Logger.warn("SvgGeometryRenderer",
+            "Page #{page_num}: pdftocairo -cropbox unavailable; used media box SVG fallback")
+        end
+
+        svg = File.read(svg_path, encoding: 'UTF-8')
 
         # Parse SVG dimensions
         svg_vb_w = (svg[/width="([^"]+)"/, 1] || vb_w).to_f
@@ -108,11 +148,11 @@ module BlueCollarSystems
 
           pts = bp[:points].map do |px, py|
             # Convert: body coords → viewBox coords → SketchUp inches
-            pdf_x = (px * geo_scale_x) - origin_x
-            pdf_y = (svg_vb_h - py * geo_scale_y) - origin_y
+            pdf_x = (px * geo_scale_x) - render_min_x
+            pdf_y = (svg_vb_h - py * geo_scale_y) - render_min_y
             Geom::Point3d.new(
-              pdf_x * PDF_PT_TO_INCH * scale,
-              pdf_y * PDF_PT_TO_INCH * scale,
+              (pdf_x * PDF_PT_TO_INCH * scale) + box_offset_x_in,
+              (pdf_y * PDF_PT_TO_INCH * scale) + box_offset_y_in,
               0.0
             )
           end
@@ -201,10 +241,10 @@ module BlueCollarSystems
             defn = glyph_defs[p[:glyph_id]]
             next unless defn
             # Glyph positions are in viewBox coords (no scaling needed)
-            pdf_x = p[:x] - origin_x
-            pdf_y = (svg_vb_h - p[:y]) - origin_y
-            x_inch = pdf_x * PDF_PT_TO_INCH * scale
-            y_inch = pdf_y * PDF_PT_TO_INCH * scale
+            pdf_x = p[:x] - render_min_x
+            pdf_y = (svg_vb_h - p[:y]) - render_min_y
+            x_inch = (pdf_x * PDF_PT_TO_INCH * scale) + box_offset_x_in
+            y_inch = (pdf_y * PDF_PT_TO_INCH * scale) + box_offset_y_in
             begin
               inst = entities.add_instance(defn,
                 Geom::Transformation.new(Geom::Point3d.new(x_inch, y_inch, 0.0)))

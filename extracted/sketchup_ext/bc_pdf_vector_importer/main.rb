@@ -377,29 +377,51 @@ module BlueCollarSystems
         xobj = XObjectParser.new(parser)
         xobj.scan_page(page_num)
         xobj.count_references(streams)
+        xobj_paths = xobj.expanded_paths(streams)
+        if xobj_paths && !xobj_paths.empty?
+          paths += xobj_paths
+          Logger.info("Pipeline",
+            "Page #{page_num}: merged #{xobj_paths.length} transformed XObject path group(s).")
+        end
 
         text_items = []
         if opts[:import_text]
           Sketchup.status_text = "PDF Import#{pct} — Page #{page_num} — Extracting text... [#{(Time.now - import_start).round(1)}s]"
+          strict_text_fidelity = !!opts[:strict_text_fidelity]
+          # 3D text placement relies on merged text runs for readability.
+          # Keep strict per-span behavior for labels/geometry paths only.
+          strict_text_processing = strict_text_fidelity && (requested_text_mode != :text3d)
           # 3D text alignment is most stable when we use baseline-aware
           # coordinates from content streams first, then fall back to bbox text.
-          prefer_internal_text = (requested_text_mode == :text3d)
+          # Strict fidelity for labels/geometry also benefits from baseline-true
+          # content stream coordinates, especially for rotated dimensions.
+          prefer_internal_text = (requested_text_mode == :text3d) || strict_text_processing
           if prefer_internal_text
             font_maps = parser.page_font_maps(page_num)
-            text_items = TextParser.new(streams, font_maps).parse
+            text_items = TextParser.new(
+              streams,
+              font_maps,
+              strict_text_fidelity: strict_text_processing
+            ).parse
             text_source = :internal
             if text_items.nil? || text_items.empty?
               text_items = ExternalTextExtractor.extract(path, page_num,
-                offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
+                offset_x_pts: text_offset_x, offset_y_pts: text_offset_y,
+                strict_text_fidelity: strict_text_processing)
               text_source = :external
             end
           else
             text_items = ExternalTextExtractor.extract(path, page_num,
-              offset_x_pts: text_offset_x, offset_y_pts: text_offset_y)
+              offset_x_pts: text_offset_x, offset_y_pts: text_offset_y,
+              strict_text_fidelity: strict_text_processing)
             text_source = :external
             if text_items.nil? || text_items.empty?
               font_maps = parser.page_font_maps(page_num)
-              text_items = TextParser.new(streams, font_maps).parse
+              text_items = TextParser.new(
+                streams,
+                font_maps,
+                strict_text_fidelity: strict_text_processing
+              ).parse
               text_source = :internal
             end
           end
@@ -502,6 +524,7 @@ module BlueCollarSystems
           detect_arcs: opts[:detect_arcs], map_dashes: opts[:map_dashes],
           import_text: use_svg_text ? false : opts[:import_text],
           use_3d_text: builder_use_3d_text,
+          strict_text_fidelity: opts[:strict_text_fidelity],
           y_offset: page_y_offset)
         result = builder.build
         stats[:edges] += result[:edges]; stats[:faces] += result[:faces]
@@ -556,6 +579,7 @@ module BlueCollarSystems
               scale_factor: opts[:scale], layer_name: opts[:layer_name],
               group_per_page: false, page_number: page_num,
               flatten_to_2d: true, import_text: true, use_3d_text: fallback_use_3d,
+              strict_text_fidelity: opts[:strict_text_fidelity],
               y_offset: page_y_offset,
               target_entities: builder.page_group.entities)
             fb_result = fallback_builder.build
@@ -763,13 +787,29 @@ module BlueCollarSystems
         if stats
           ReportDialog.show_report(stats)
         else
-          UI.messagebox("No vector content found in PDF.")
+          UI.messagebox(
+            "No vector geometry found in this PDF.\n\n" \
+            "Possible causes:\n" \
+            "  - The PDF contains only scanned images (no vectors)\n" \
+            "  - The PDF uses unsupported compression or features\n" \
+            "  - All pages were empty or filtered out\n\n" \
+            "Try the Raster Image preset to import as an image instead.")
         end
       rescue StandardError => e
         safe_abort_operation(model, "Import")
         Logger.error("Import", "Import failed", e)
         log_hint = Logger.log_path ? "\n\nDetails saved to:\n#{Logger.log_path}" : ""
-        UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
+        # Provide a friendlier message for encrypted PDFs
+        if e.message =~ /encrypted/i
+          UI.messagebox(
+            "This PDF is encrypted and cannot be imported.\n\n" \
+            "Please remove the encryption first:\n" \
+            "  - Print the PDF to a new file (e.g. Microsoft Print to PDF)\n" \
+            "  - Or use a tool like QPDF to decrypt it\n\n" \
+            "Then try importing the new file.")
+        else
+          UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
+        end
       end
     end
 
@@ -784,13 +824,26 @@ module BlueCollarSystems
         opts = ImportDialog.send(:build_opts, fast.merge(pages: 'All'))
         stats = run_pipeline(model, path, opts)
         unless stats
-          UI.messagebox("No vector content found in PDF.")
+          UI.messagebox(
+            "No vector geometry found in this PDF.\n\n" \
+            "The PDF may contain only scanned images, or use\n" \
+            "unsupported features. Try the Raster Image preset\n" \
+            "from the main Import dialog instead.")
         end
       rescue StandardError => e
         safe_abort_operation(model, "ImportSafe")
         Logger.error("ImportSafe", "Safe mode import failed", e)
         log_hint = Logger.log_path ? "\n\nDetails saved to:\n#{Logger.log_path}" : ""
-        UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
+        if e.message =~ /encrypted/i
+          UI.messagebox(
+            "This PDF is encrypted and cannot be imported.\n\n" \
+            "Please remove the encryption first:\n" \
+            "  - Print the PDF to a new file (e.g. Microsoft Print to PDF)\n" \
+            "  - Or use a tool like QPDF to decrypt it\n\n" \
+            "Then try importing the new file.")
+        else
+          UI.messagebox("PDF import failed:\n#{e.message}#{log_hint}")
+        end
       end
     end
 
@@ -889,10 +942,24 @@ module BlueCollarSystems
         model = Sketchup.active_model
         return Sketchup::Importer::ImportFail unless model
         stats = BlueCollarSystems::PDFVectorImporter.run_pipeline(model, file_path, opts)
-        stats ? Sketchup::Importer::ImportSuccess : Sketchup::Importer::ImportFail
+        if stats
+          ReportDialog.show_report(stats)
+          Sketchup::Importer::ImportSuccess
+        else
+          UI.messagebox(
+            "No vector geometry found in this PDF.\n\n" \
+            "Try the Raster Image preset to import as an image instead.")
+          Sketchup::Importer::ImportFail
+        end
       rescue StandardError => e
         BlueCollarSystems::PDFVectorImporter.safe_abort_operation(model, "PDFFileImporter")
         Logger.error("PDFFileImporter", "load_file failed", e)
+        if e.message =~ /encrypted/i
+          UI.messagebox(
+            "This PDF is encrypted and cannot be imported.\n\n" \
+            "Please remove the encryption first (e.g. print to a new PDF)\n" \
+            "and try importing the new file.")
+        end
         Sketchup::Importer::ImportFail
       end
     end

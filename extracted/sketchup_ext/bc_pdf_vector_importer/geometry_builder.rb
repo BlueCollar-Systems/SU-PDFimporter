@@ -34,6 +34,7 @@ module BlueCollarSystems
         @map_dashes      = opts[:map_dashes] || false
         @import_text     = opts[:import_text] || false
         @use_3d_text     = opts[:use_3d_text] || false
+        @strict_text_fidelity = opts[:strict_text_fidelity] || false
         @target_entities = opts[:target_entities] || nil
         @y_offset        = opts[:y_offset] || 0.0
 
@@ -427,8 +428,14 @@ module BlueCollarSystems
         begin
           # Convert PDF coordinate to SketchUp point
           pt = pdf_to_su(item.x, item.y, origin_x, origin_y)
+          item_angle = item.respond_to?(:angle) ? item.angle.to_f : 0.0
+          rotated_label_geometry = (
+            !@use_3d_text &&
+            @strict_text_fidelity &&
+            angle_needs_geometry_text?(item_angle)
+          )
 
-          if @use_3d_text
+          if @use_3d_text || rotated_label_geometry
             # ── Geometry mode: add_3d_text (proper filled letterforms) ──
             page_h = (@media_box[3] - @media_box[1]).abs
             page_h = 792.0 if page_h < 1
@@ -449,7 +456,7 @@ module BlueCollarSystems
               fs = fs * 0.30
               # Shift origin up: bbox bottom includes descender space
               # Keep this conservative to avoid drift on rotated/angled blueprint text.
-              baseline_ratio = (item.angle && item.angle.to_f.abs > 10.0) ? 0.0 : 0.05
+              baseline_ratio = (item_angle.abs > 10.0) ? 0.0 : 0.05
               baseline_shift = bbox_h * baseline_ratio * PDF_POINT_TO_INCH * @scale
               pt = Geom::Point3d.new(pt.x, pt.y + baseline_shift, pt.z)
             end
@@ -480,8 +487,8 @@ module BlueCollarSystems
                 if new_ents.any?
                   # Build transform: move to position, optionally rotate
                   xform = Geom::Transformation.new(pt)
-                  if item.angle && item.angle.abs > 0.1
-                    rot = Geom::Transformation.rotation(ORIGIN, Z_AXIS, item.angle.degrees)
+                  if item_angle.abs > 0.1
+                    rot = Geom::Transformation.rotation(ORIGIN, Z_AXIS, item_angle.degrees)
                     xform = xform * rot
                   end
                   entities.transform_entities(xform, *new_ents)
@@ -525,6 +532,27 @@ module BlueCollarSystems
         rescue StandardError => e
           Logger.warn("GeometryBuilder", "place_text failed: #{e.message}")
         end
+      end
+
+      # Use geometry text only for non-horizontal labels when strict fidelity is enabled.
+      # This avoids needlessly converting horizontal labels that annotation text handles well.
+      # Threshold is tunable via BC_SU_ROTATED_LABEL_DEG for troubleshooting.
+      def angle_needs_geometry_text?(angle_deg, tol_deg = 12.0)
+        env = ENV['BC_SU_ROTATED_LABEL_DEG']
+        if env && !env.to_s.strip.empty?
+          begin
+            parsed = env.to_f
+            tol_deg = parsed if parsed >= 0.0 && parsed <= 89.0
+          rescue StandardError
+            # keep default tolerance
+          end
+        end
+        a = angle_deg.to_f % 180.0
+        a += 180.0 if a < 0.0
+        a = 180.0 - a if a > 90.0
+        a > tol_deg.to_f
+      rescue StandardError
+        false
       end
 
       # ---------------------------------------------------------------

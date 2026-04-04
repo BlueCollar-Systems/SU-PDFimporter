@@ -96,6 +96,29 @@ module BlueCollarSystems
           lines << "#{dims} dimensions associated with geometry." if dims > 0
         end
 
+        # Failed pages warning
+        if stats[:failed_pages] && !stats[:failed_pages].empty?
+          lines << ""
+          fp = stats[:failed_pages]
+          lines << "WARNING: #{fp.length} page#{fp.length == 1 ? '' : 's'} failed to import:"
+          fp.each do |info|
+            reason = info[:error].to_s
+            if reason =~ /encrypted/i
+              reason = "encrypted PDF"
+            elsif reason.length > 60
+              reason = reason[0, 57] + "..."
+            end
+            lines << "  Page #{info[:page]}: #{reason}"
+          end
+        end
+
+        # Raster fallback notice
+        if stats[:raster_fallback_used]
+          lines << ""
+          lines << "Note: This PDF was imported as a raster image"
+          lines << "(no usable vector geometry was found)."
+        end
+
         # Cleanup summary
         if stats[:cleanup] && !stats[:cleanup].empty?
           cleaned = stats[:cleanup].select { |_, v| v > 0 }

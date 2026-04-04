@@ -12,6 +12,11 @@
 module BlueCollarSystems
   module PDFVectorImporter
     class XObjectParser
+      MAX_EXPANDED_PATH_GROUPS_TOTAL = 50_000
+      MAX_EXPANDED_PATH_GROUPS_PER_FORM = 20_000
+      MAX_FORM_STREAM_BYTES = 2_000_000
+      MAX_TOTAL_FORM_STREAM_BYTES = 8_000_000
+      MAX_FORMS_TO_EXPAND = 128
 
       # Represents a reusable Form XObject
       FormXObject = Struct.new(
@@ -180,11 +185,101 @@ module BlueCollarSystems
         form = @form_xobjects[name]
         return [] unless form && form.stream_data
 
+        return form.paths if form.paths && !form.paths.empty?
+
         # Re-use the content stream parser
         cs_parser = ContentStreamParser.new([form.stream_data], @pdf)
         paths = cs_parser.parse
         form.paths = paths
         paths
+      end
+
+      # ---------------------------------------------------------------
+      # Expand all placed Form XObjects into regular VectorPath objects.
+      # This allows downstream extraction to treat page-level and XObject
+      # geometry uniformly.
+      # ---------------------------------------------------------------
+      def expanded_paths(streams)
+        return [] unless streams
+
+        track_placements(streams)
+
+        out = []
+        expanded_groups = 0
+        processed_stream_bytes = 0
+        processed_forms = 0
+        @form_xobjects.each do |name, form|
+          next unless form
+
+          if processed_forms >= MAX_FORMS_TO_EXPAND
+            Logger.warn(
+              "XObjectParser",
+              "Stopping Form XObject expansion after #{processed_forms} forms " \
+              "(limit #{MAX_FORMS_TO_EXPAND})."
+            )
+            break
+          end
+
+          placements = form.instance_xforms
+          next if placements.nil? || placements.empty?
+
+          stream_size = form.stream_data ? form.stream_data.bytesize : 0
+          if stream_size > MAX_FORM_STREAM_BYTES
+            Logger.warn(
+              "XObjectParser",
+              "Skipping Form XObject #{name}: stream is #{stream_size} bytes " \
+              "(limit #{MAX_FORM_STREAM_BYTES})."
+            )
+            next
+          end
+
+          if processed_stream_bytes + stream_size > MAX_TOTAL_FORM_STREAM_BYTES
+            Logger.warn(
+              "XObjectParser",
+              "Stopping Form XObject expansion at #{processed_stream_bytes} stream bytes " \
+              "(limit #{MAX_TOTAL_FORM_STREAM_BYTES})."
+            )
+            break
+          end
+          processed_stream_bytes += stream_size
+
+          raw_paths = parse_xobject_paths(name)
+          next if raw_paths.nil? || raw_paths.empty?
+          processed_forms += 1
+
+          candidate_count = raw_paths.length * placements.length
+          if candidate_count > MAX_EXPANDED_PATH_GROUPS_PER_FORM
+            Logger.warn(
+              "XObjectParser",
+              "Skipping Form XObject #{name}: expansion would create #{candidate_count} path groups " \
+              "(limit #{MAX_EXPANDED_PATH_GROUPS_PER_FORM})."
+            )
+            next
+          end
+
+          if expanded_groups + candidate_count > MAX_EXPANDED_PATH_GROUPS_TOTAL
+            Logger.warn(
+              "XObjectParser",
+              "Stopping Form XObject expansion at #{expanded_groups} path groups " \
+              "(limit #{MAX_EXPANDED_PATH_GROUPS_TOTAL})."
+            )
+            break
+          end
+
+          form_matrix = normalize_matrix(form.matrix)
+          placements.each do |placement|
+            placement_matrix = normalize_matrix(placement)
+            final_matrix = multiply_matrices(placement_matrix, form_matrix)
+            raw_paths.each do |path|
+              transformed = transform_vector_path(path, final_matrix, name)
+              next unless transformed
+              out << transformed
+              expanded_groups += 1
+            end
+          end
+        end
+
+        out
       end
 
       # ---------------------------------------------------------------
@@ -248,6 +343,56 @@ module BlueCollarSystems
           m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
           m1[4] * m2[1] + m1[5] * m2[3] + m2[5]
         ]
+      end
+
+      def normalize_matrix(m)
+        return [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] unless m.is_a?(Array) && m.length >= 6
+        [m[0].to_f, m[1].to_f, m[2].to_f, m[3].to_f, m[4].to_f, m[5].to_f]
+      end
+
+      def transform_point(pt, matrix)
+        return [0.0, 0.0] unless pt.is_a?(Array) && pt.length >= 2
+        x = pt[0].to_f
+        y = pt[1].to_f
+        [
+          matrix[0] * x + matrix[2] * y + matrix[4],
+          matrix[1] * x + matrix[3] * y + matrix[5]
+        ]
+      end
+
+      def transform_vector_path(path, matrix, fallback_layer)
+        return nil unless path && path.respond_to?(:subpaths) && path.subpaths
+
+        transformed_subpaths = []
+        path.subpaths.each do |subpath|
+          next unless subpath && subpath.respond_to?(:segments) && subpath.segments
+          transformed_segments = []
+          subpath.segments.each do |seg|
+            next unless seg && seg.respond_to?(:points) && seg.points
+            transformed_points = seg.points.map { |pt| transform_point(pt, matrix) }
+            transformed_segments << ContentStreamParser::Segment.new(seg.type, transformed_points)
+          end
+          transformed_subpaths << ContentStreamParser::SubPath.new(transformed_segments, subpath.closed)
+        end
+
+        layer_name = path.layer_name
+        if layer_name.nil? || layer_name.to_s.strip.empty?
+          layer_name = fallback_layer
+        end
+
+        ContentStreamParser::VectorPath.new(
+          transformed_subpaths,
+          path.stroke,
+          path.fill,
+          path.stroke_color,
+          path.fill_color,
+          path.line_width,
+          path.line_cap,
+          path.line_join,
+          path.dash_pattern,
+          matrix,
+          layer_name
+        )
       end
 
       def tokenize_stream(stream)

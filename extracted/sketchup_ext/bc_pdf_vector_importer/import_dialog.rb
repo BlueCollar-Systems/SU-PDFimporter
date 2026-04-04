@@ -15,25 +15,34 @@ module BlueCollarSystems
           scale: '1.0', bezier_segments: '8', import_as: 'Edges Only',
           import_fills: 'No', group_by_color: 'No', detect_arcs: 'No',
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
-          force_raster: 'No', raster_dpi: '300'
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Group per page'
         },
         'Full' => {
           scale: '1.0', bezier_segments: '24', import_as: 'Edges and Faces',
           import_fills: 'Yes', group_by_color: 'Yes', detect_arcs: 'Yes',
           map_dashes: 'Yes', text_mode: 'Geometry', hatch_mode: 'Group',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'Yes', recognition_mode: 'None',
           merge_tolerance: '0.001', units: 'Inches',
-          force_raster: 'No', raster_dpi: '300'
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Group per page'
         },
         'Raster Image' => {
           scale: '1.0', bezier_segments: '8', import_as: 'Edges Only',
           import_fills: 'No', group_by_color: 'No', detect_arcs: 'No',
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
+          strict_text_fidelity: 'No',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
-          force_raster: 'Yes', raster_dpi: '300'
+          force_raster: 'Yes', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Single group'
         },
         'Custom...' => nil
       }.freeze
@@ -124,6 +133,7 @@ module BlueCollarSystems
           bezier_segments:  saved[:bezier_segments]                    || '24',
           text_mode:        text_mode_str  || saved[:text_mode]        || 'Geometry',
           hatch_mode:       saved[:hatch_mode]                         || 'Group',
+          strict_text_fidelity: saved[:strict_text_fidelity]           || 'No',
           detect_arcs:      saved[:detect_arcs]                        || 'Yes',
           map_dashes:       saved[:map_dashes]                         || 'Yes',
           import_fills:     saved[:import_fills]                       || 'Yes',
@@ -143,6 +153,7 @@ module BlueCollarSystems
             pages: p['pages'], scale: p['scale'],
             bezier_segments: p['bezier_segments'],
             text_mode: p['text_mode'], hatch_mode: p['hatch_mode'],
+            strict_text_fidelity: p['strict_text_fidelity'],
             detect_arcs: p['detect_arcs'], map_dashes: p['map_dashes'],
             import_fills: p['import_fills'],
             cleanup_geometry: p['cleanup_geometry'],
@@ -159,7 +170,7 @@ module BlueCollarSystems
             group_per_page: 'Yes', import_fills: p['import_fills'],
             group_by_color: 'Yes', detect_arcs: p['detect_arcs'],
             map_dashes: p['map_dashes'], text_mode: p['text_mode'],
-            hatch_mode: p['hatch_mode'],
+            hatch_mode: p['hatch_mode'], strict_text_fidelity: p['strict_text_fidelity'],
             raster_fallback: 'Yes', cleanup_geometry: p['cleanup_geometry'],
             force_raster: p['force_raster'], raster_dpi: p['raster_dpi'],
             recognition_mode: 'None', merge_tolerance: '0.001', units: 'Inches',
@@ -325,6 +336,12 @@ module BlueCollarSystems
             <div><label>Hatching</label>
               <select id="hatch_mode">#{hatch_opts}</select></div>
           </div>
+          <div class="row2">
+            <div><label>Strict Text Fidelity</label>
+              <select id="strict_text_fidelity">#{yn.call(:strict_text_fidelity)}</select>
+              <p class="hint">Preserve exact extracted text spans; disables aggressive text cleanup.</p>
+            </div>
+          </div>
           <div class="section">Advanced Controls</div>
           <div class="row2">
             <div><label>Arc Mode</label>
@@ -356,6 +373,7 @@ module BlueCollarSystems
             bezier_segments:document.getElementById('bezier_segments').value.trim()||'24',
             text_mode:document.getElementById('text_mode').value,
             hatch_mode:document.getElementById('hatch_mode').value,
+            strict_text_fidelity:document.getElementById('strict_text_fidelity').value,
             detect_arcs:document.getElementById('detect_arcs').value,
             map_dashes:document.getElementById('map_dashes').value,
             import_fills:document.getElementById('import_fills').value,
@@ -396,7 +414,8 @@ module BlueCollarSystems
       def self.show_inputbox_advanced(filename, pages_str, scale_str, text_mode_str, saved)
         prompts = [
           "Pages:","Scale Factor:","Curve Smoothness (4=fast, 48=smooth):",
-          "Import Text:","Hatchings:","Rebuild Arcs from Curves:",
+          "Import Text:","Hatchings:","Strict Text Fidelity:",
+          "Rebuild Arcs from Curves:",
           "Map Dashed/Hidden Lines:","Import Filled Regions:",
           "Auto-Clean Geometry:","Force Raster Image (skip vectors):","Raster DPI (200-600):",
           "Arc Mode:","Cleanup Level:","Lineweight Handling:","Grouping Mode:"
@@ -405,22 +424,24 @@ module BlueCollarSystems
           pages_str||saved[:pages]||'All', scale_str||saved[:scale]||'1.0',
           saved[:bezier_segments]||'24',
           text_mode_str||saved[:text_mode]||'Geometry',
-          saved[:hatch_mode]||'Group', saved[:detect_arcs]||'Yes',
+          saved[:hatch_mode]||'Group', saved[:strict_text_fidelity]||'No',
+          saved[:detect_arcs]||'Yes',
           saved[:map_dashes]||'Yes',   saved[:import_fills]||'Yes',
           saved[:cleanup_geometry]||'Yes', saved[:force_raster]||'No',
           saved[:raster_dpi]||'300',
           saved[:arc_mode]||'Auto', saved[:cleanup_level]||'Balanced',
           saved[:lineweight_mode]||'Ignore', saved[:grouping_mode]||'Group per page'
         ]
-        dropdowns = ['','','',TEXT_MODES,HATCH_MODES,YES_NO,YES_NO,YES_NO,YES_NO,YES_NO,'',
+        dropdowns = ['','','',TEXT_MODES,HATCH_MODES,YES_NO,YES_NO,YES_NO,YES_NO,YES_NO,YES_NO,'',
                      ARC_MODE_CHOICES,CLEANUP_LEVEL_CHOICES,LINEWEIGHT_CHOICES,GROUPING_CHOICES]
         result = UI.inputbox(prompts, defaults, dropdowns, "Custom Import \u2014 #{filename}")
         return nil unless result
-        p_pages,p_scale,p_bezier,p_text_mode,p_hatch,
+        p_pages,p_scale,p_bezier,p_text_mode,p_hatch,p_strict_text,
         p_arcs,p_dashes,p_fills,p_cleanup,p_force_raster,p_raster_dpi,
         p_arc_mode,p_cleanup_level,p_lineweight_mode,p_grouping_mode = result
         save_prefs(pages:p_pages,scale:p_scale,bezier_segments:p_bezier,
                    text_mode:p_text_mode,hatch_mode:p_hatch,
+                   strict_text_fidelity:p_strict_text,
                    detect_arcs:p_arcs,map_dashes:p_dashes,import_fills:p_fills,
                    cleanup_geometry:p_cleanup,force_raster:p_force_raster,
                    raster_dpi:p_raster_dpi,arc_mode:p_arc_mode,
@@ -432,6 +453,7 @@ module BlueCollarSystems
                    group_per_page:'Yes',import_fills:p_fills,
                    group_by_color:'Yes',detect_arcs:p_arcs,
                    map_dashes:p_dashes,text_mode:p_text_mode,hatch_mode:p_hatch,
+                   strict_text_fidelity:p_strict_text,
                    raster_fallback:'Yes',cleanup_geometry:p_cleanup,
                    force_raster:p_force_raster,raster_dpi:p_raster_dpi,
                    recognition_mode:'None',merge_tolerance:'0.001',units:'Inches',
@@ -514,6 +536,7 @@ module BlueCollarSystems
           map_dashes:       (raw[:map_dashes] || 'Yes') == 'Yes',
           import_text:      import_text,
           text_mode:        text_mode,
+          strict_text_fidelity: (raw[:strict_text_fidelity] || 'No') == 'Yes',
           use_3d_text:      use_3d_text,
           hatch_mode:       hatch,
           raster_fallback:  (raw[:raster_fallback] || 'Yes') == 'Yes',
@@ -535,7 +558,7 @@ module BlueCollarSystems
         begin
           %w[last_preset pages scale bezier_segments import_as layer_name
              group_per_page import_fills group_by_color detect_arcs
-             map_dashes text_mode hatch_mode raster_fallback force_raster
+             map_dashes text_mode strict_text_fidelity hatch_mode raster_fallback force_raster
              raster_dpi cleanup_geometry recognition_mode merge_tolerance units
              arc_mode cleanup_level lineweight_mode grouping_mode
           ].each do |key|
