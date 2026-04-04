@@ -180,7 +180,7 @@ bc_pdf_vector_importer/
 
 | SketchUp Version | Ruby Version | Status |
 |------------------|-------------|--------|
-| 2017–2019 | 2.2–2.5 | Supported (including Make) |
+| 2017–2019 | 2.2–2.5 | Supported (including Make; Ruby 2.2 smoke CI-tested) |
 | 2020 | 2.5 | May work, not CI-tested |
 | 2021–2023 | 2.7 | CI-tested |
 | 2024+ | 3.2+ | CI-tested |
