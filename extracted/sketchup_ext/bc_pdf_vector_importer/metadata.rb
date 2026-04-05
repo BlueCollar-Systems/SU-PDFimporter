@@ -6,6 +6,8 @@
 
 module BlueCollarSystems
   module PDFVectorImporter
+    VERSION = '3.6.7'.freeze
+
     module Metadata
 
       DICT_NAME = 'BlueCollar_PDF_Import'.freeze
