@@ -17,7 +17,19 @@ module BlueCollarSystems
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
-          force_raster: 'No', raster_dpi: '300'
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Group per page'
+        },
+        'Balanced' => {
+          scale: '1.0', bezier_segments: '16', import_as: 'Edges and Faces',
+          import_fills: 'Yes', group_by_color: 'Yes', detect_arcs: 'Yes',
+          map_dashes: 'Yes', text_mode: 'Labels', hatch_mode: 'Skip',
+          cleanup_geometry: 'Yes', recognition_mode: 'None',
+          merge_tolerance: '0.002', units: 'Inches',
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Conservative',
+          lineweight_mode: 'Ignore', grouping_mode: 'Group per page'
         },
         'Full' => {
           scale: '1.0', bezier_segments: '24', import_as: 'Edges and Faces',
@@ -25,7 +37,19 @@ module BlueCollarSystems
           map_dashes: 'Yes', text_mode: 'Geometry', hatch_mode: 'Group',
           cleanup_geometry: 'Yes', recognition_mode: 'None',
           merge_tolerance: '0.001', units: 'Inches',
-          force_raster: 'No', raster_dpi: '300'
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Group per page'
+        },
+        'Max Fidelity' => {
+          scale: '1.0', bezier_segments: '32', import_as: 'Edges and Faces',
+          import_fills: 'Yes', group_by_color: 'Yes', detect_arcs: 'Yes',
+          map_dashes: 'Yes', text_mode: 'Geometry', hatch_mode: 'Import',
+          cleanup_geometry: 'Yes', recognition_mode: 'None',
+          merge_tolerance: '0.0005', units: 'Inches',
+          force_raster: 'No', raster_dpi: '300',
+          arc_mode: 'Rebuild arcs', cleanup_level: 'Aggressive',
+          lineweight_mode: 'Preserve visually', grouping_mode: 'Nested: page > layer'
         },
         'Raster Image' => {
           scale: '1.0', bezier_segments: '8', import_as: 'Edges Only',
@@ -33,7 +57,9 @@ module BlueCollarSystems
           map_dashes: 'No', text_mode: 'No text', hatch_mode: 'Skip',
           cleanup_geometry: 'No', recognition_mode: 'None',
           merge_tolerance: '0.005', units: 'Inches',
-          force_raster: 'Yes', raster_dpi: '300'
+          force_raster: 'Yes', raster_dpi: '300',
+          arc_mode: 'Auto', cleanup_level: 'Balanced',
+          lineweight_mode: 'Ignore', grouping_mode: 'Single group'
         },
         'Custom...' => nil
       }.freeze

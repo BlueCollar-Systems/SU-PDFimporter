@@ -78,7 +78,7 @@ module BlueCollarSystems
       #     start_pt: [x,y], mid_pt: [x,y], end_pt: [x,y] }
       # ---------------------------------------------------------------
       def self.detect_arcs_in_polyline(points, opts = {})
-        tol_mm   = opts[:arc_fit_tol] || 0.08
+        arc_tol   = opts[:arc_fit_tol] || 0.08
         min_segs = opts[:min_arc_segments] || 3
         max_segs = opts[:max_arc_segments] || 64
         min_angle = opts[:min_arc_angle_deg] || 5.0
@@ -104,7 +104,7 @@ module BlueCollarSystems
               if fit
                 cx, cy, r, rms = fit
                 # Accept if fit is good relative to radius
-                tol = [tol_mm, r * 0.005].max
+                tol = [arc_tol, r * 0.005].max
                 if rms < tol && r > 0.01
                   # Check arc sweep is meaningful
                   dx0 = run_pts.first[0] - cx

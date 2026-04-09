@@ -333,6 +333,12 @@ module BlueCollarSystems
         )
         if raster_ok
           model.commit_operation
+          # Autofit viewport after force-raster import
+          begin
+            view = model.active_view
+            view.zoom_extents if view
+          rescue => _e
+          end
           return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
                    text: 0, components: 0, layers: [], cleanup: {},
                    generic: nil, mode_used: nil, xobjects: 0,
@@ -373,6 +379,12 @@ module BlueCollarSystems
           raster_ok = import_page_as_raster(model, path, 1, media_box, opts, import_start)
           if raster_ok
             model.commit_operation
+            # Autofit viewport after parser-failed raster fallback
+            begin
+              view = model.active_view
+              view.zoom_extents if view
+            rescue => _e
+            end
             return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
                      text: 0, components: 0, layers: [], cleanup: {},
                      generic: nil, mode_used: nil, xobjects: 0,

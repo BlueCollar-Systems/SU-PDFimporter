@@ -216,10 +216,11 @@ module BlueCollarSystems
         # Convert Point3d to [x,y] for the arc fitter
         pts_2d = points.map { |p| [p.x, p.y] }
 
+        # Arc fit tolerance in inches (consistent with arc_fitter.rb which
+        # expects inches).  0.003" ≈ 0.08mm matches the Python importers'
+        # default arc_fit_tol_mm.  Scaled by import scale factor.
         segments = ArcFitter.detect_arcs_in_polyline(pts_2d,
-          arc_fit_tol: 0.002 * @scale,  # Scale tolerance with import scale
-          # Require at least 4 line segments (5 points) before promoting to arc.
-          # 3-segment runs are commonly orthogonal corners that circle-fit badly.
+          arc_fit_tol: 0.003 * @scale,
           min_arc_segments: 4,
           max_arc_segments: 64
         )
