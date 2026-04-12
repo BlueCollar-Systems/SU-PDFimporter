@@ -203,6 +203,39 @@ module BlueCollarSystems
       end
     end
 
+    def self.normalize_page_arrangement(raw)
+      key = raw.to_s.strip.downcase
+      return :overlay if key.include?("overlay")
+      return :touch if key.include?("touch")
+      return :compact if key.include?("compact")
+      :spread
+    end
+
+    def self.normalize_page_gap_ratio(raw)
+      val = begin
+        Float(raw)
+      rescue StandardError
+        0.20
+      end
+      val = 0.20 unless val.finite?
+      [[val, 0.0].max, 1.0].min
+    end
+
+    def self.page_stack_step(page_height_in, arrangement, gap_ratio)
+      h = page_height_in.to_f
+      h = 11.0 if h <= 0.0
+      case arrangement
+      when :overlay
+        0.0
+      when :touch
+        h
+      when :compact
+        h * (1.0 + gap_ratio.to_f)
+      else
+        h * 1.2
+      end
+    end
+
     # Add a deterministic page-sized fit box in SketchUp model space.
     # This makes "fit all" resilient even when imported entities contain
     # sparse labels, nested groups, or occasional outlier bounds.
@@ -301,6 +334,66 @@ module BlueCollarSystems
       nil
     end
 
+    def self.apply_top_view_fit(model, preferred_bb = nil, imported_entities = nil)
+      return unless model
+      view = model.active_view
+      return unless view
+
+      bb = Geom::BoundingBox.new
+      bb.add(preferred_bb) if fit_usable_bounds?(preferred_bb)
+
+      unless fit_usable_bounds?(bb)
+        targets = Array(imported_entities)
+        if targets.empty?
+          begin
+            targets = model.active_entities.to_a
+          rescue StandardError
+            targets = []
+          end
+        end
+
+        fit_targets = targets.select do |e|
+          next false unless e && e.valid? && e.respond_to?(:bounds)
+          next false if fit_ignored_entity?(e)
+          fit_usable_bounds?(e.bounds)
+        end
+
+        # If a page only produced label entities, still fit to what was imported.
+        if fit_targets.empty?
+          fit_targets = targets.select do |e|
+            e && e.valid? && e.respond_to?(:bounds) && fit_usable_bounds?(e.bounds)
+          end
+        end
+        fit_targets.each { |e| collect_fit_bounds(e, bb) }
+      end
+
+      if fit_usable_bounds?(bb)
+        begin
+          center = bb.center
+          eye = Geom::Point3d.new(center.x, center.y, center.z + 1000)
+          target = center
+          up = Geom::Vector3d.new(0, 1, 0)
+          view.camera = Sketchup::Camera.new(eye, target, up)
+          view.camera.perspective = false
+          view.zoom(bb)
+        rescue StandardError
+          # Fallback if zoom(bb) fails on older SketchUp versions
+          view.zoom_extents
+        end
+      else
+        view.zoom_extents
+      end
+      # Final safety: always try zoom_extents as a last resort
+      # in case the camera/zoom approach silently failed
+      view.zoom_extents
+    rescue StandardError => e
+      Logger.warn("Pipeline", "Auto-fit view failed: #{e.message}")
+      begin
+        view.zoom_extents if view
+      rescue StandardError
+      end
+    end
+
     def self.run_pipeline(model, path, opts)
       Logger.reset
       config = RecognitionConfig.default
@@ -333,12 +426,9 @@ module BlueCollarSystems
         )
         if raster_ok
           model.commit_operation
-          # Autofit viewport after force-raster import
-          begin
-            view = model.active_view
-            view.zoom_extents if view
-          rescue StandardError
-          end
+          fit_bb = Geom::BoundingBox.new
+          add_page_fit_bounds(fit_bb, media_box, raster_box, opts[:scale], 0.0)
+          apply_top_view_fit(model, fit_bb)
           return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
                    text: 0, components: 0, layers: [], cleanup: {},
                    generic: nil, mode_used: nil, xobjects: 0,
@@ -379,12 +469,9 @@ module BlueCollarSystems
           raster_ok = import_page_as_raster(model, path, 1, media_box, opts, import_start)
           if raster_ok
             model.commit_operation
-            # Autofit viewport after parser-failed raster fallback
-            begin
-              view = model.active_view
-              view.zoom_extents if view
-            rescue StandardError
-            end
+            fit_bb = Geom::BoundingBox.new
+            add_page_fit_bounds(fit_bb, media_box, media_box, opts[:scale], 0.0)
+            apply_top_view_fit(model, fit_bb)
             return { pages: 1, primitives: 0, edges: 0, faces: 0, arcs: 0,
                      text: 0, components: 0, layers: [], cleanup: {},
                      generic: nil, mode_used: nil, xobjects: 0,
@@ -431,7 +518,8 @@ module BlueCollarSystems
       page_fit_bounds = Geom::BoundingBox.new
 
       import_start = Time.now
-      stack_spacing = 1.2
+      page_arrangement = normalize_page_arrangement(opts[:page_arrangement])
+      page_gap_ratio = normalize_page_gap_ratio(opts[:page_gap_ratio])
       running_y_offset = 0.0
 
       pages.each_with_index do |page_num, idx|
@@ -468,7 +556,7 @@ module BlueCollarSystems
               stats[:pages] += 1
               stats[:raster_fallback_used] = true
               add_page_fit_bounds(page_fit_bounds, media_box, stack_box, opts[:scale], page_y_offset)
-              running_y_offset += curr_page_height_in * stack_spacing
+              running_y_offset += page_stack_step(curr_page_height_in, page_arrangement, page_gap_ratio)
             end
           end
           next
@@ -478,6 +566,7 @@ module BlueCollarSystems
         ocg_map = parser.page_ocg_map(page_num)
         cs = ContentStreamParser.new(streams, parser, ocg_map)
         paths = cs.parse
+        force_import_fills_for_page = false
 
         # Smart auto-raster override for fill-art flood pages.
         flood_hit, flood_stats = looks_like_fill_art_flood?(paths, media_box)
@@ -500,10 +589,17 @@ module BlueCollarSystems
               stats[:pages] += 1
               stats[:raster_fallback_used] = true
               add_page_fit_bounds(page_fit_bounds, media_box, stack_box, opts[:scale], page_y_offset)
-              running_y_offset += curr_page_height_in * stack_spacing
+              running_y_offset += page_stack_step(curr_page_height_in, page_arrangement, page_gap_ratio)
               next
             end
             Logger.warn("Pipeline", "Page #{page_num}: fill-art raster fallback failed; continuing with vectors.")
+            if !opts[:import_fills]
+              force_import_fills_for_page = true
+              Logger.warn(
+                "Pipeline",
+                "Page #{page_num}: enabling fill import for this page because raster fallback failed."
+              )
+            end
           else
             Logger.warn("Pipeline", "Page #{page_num}: fill-art flood detected but raster fallback is disabled.")
           end
@@ -575,7 +671,7 @@ module BlueCollarSystems
             stats[:pages] += 1
             stats[:raster_fallback_used] = true
             add_page_fit_bounds(page_fit_bounds, media_box, stack_box, opts[:scale], page_y_offset)
-            running_y_offset += curr_page_height_in * stack_spacing
+            running_y_offset += page_stack_step(curr_page_height_in, page_arrangement, page_gap_ratio)
             next
           end
           Logger.warn("Pipeline", "Page #{page_num}: text-dominant raster fallback failed; continuing with vectors/text.")
@@ -591,7 +687,7 @@ module BlueCollarSystems
               stats[:pages] += 1
               stats[:edges] += 0
               add_page_fit_bounds(page_fit_bounds, media_box, stack_box, opts[:scale], page_y_offset)
-              running_y_offset += curr_page_height_in * stack_spacing
+              running_y_offset += page_stack_step(curr_page_height_in, page_arrangement, page_gap_ratio)
             else
               Logger.warn("Pipeline",
                 "Page #{page_num}: no vector content and raster render failed; page skipped.")
@@ -664,7 +760,7 @@ module BlueCollarSystems
           import_as: opts[:import_as], layer_name: opts[:layer_name],
           group_per_page: opts[:group_per_page], page_number: page_num,
           flatten_to_2d: true, merge_tolerance: opts[:merge_tolerance],
-          import_fills: opts[:import_fills], group_by_color: opts[:group_by_color],
+          import_fills: (opts[:import_fills] || force_import_fills_for_page), group_by_color: opts[:group_by_color],
           detect_arcs: opts[:detect_arcs], map_dashes: opts[:map_dashes],
           import_text: use_svg_text ? false : opts[:import_text],
           use_3d_text: builder_use_3d_text,
@@ -744,7 +840,7 @@ module BlueCollarSystems
         add_page_fit_bounds(page_fit_bounds, media_box, stack_box, opts[:scale], page_y_offset)
 
         # Advance the running page stack only after a successful import.
-        running_y_offset += curr_page_height_in * stack_spacing
+        running_y_offset += page_stack_step(curr_page_height_in, page_arrangement, page_gap_ratio)
 
       rescue StandardError => e
         Logger.error("Pipeline", "Page #{page_num} failed: #{e.message}", e)
@@ -771,44 +867,13 @@ module BlueCollarSystems
       stats[:elapsed_seconds] = elapsed
 
       # ── Auto fit view to newly imported geometry (not model-wide extents) ──
+      imported_entities = []
       begin
-        view = model.active_view
-        if view
-          # Switch to top-down orthographic view for 2D drawing
-          bb = Geom::BoundingBox.new
-          if fit_usable_bounds?(page_fit_bounds)
-            bb.add(page_fit_bounds)
-          else
-            imported_entities = model.active_entities.to_a - pre_import_entities
-            fit_targets = imported_entities.select do |e|
-              next false if fit_ignored_entity?(e)
-              next false unless e.respond_to?(:bounds) && e.valid?
-              fit_usable_bounds?(e.bounds)
-            end
-            # If a page only produced label entities, still fit to what was imported.
-            if fit_targets.empty?
-              fit_targets = imported_entities.select do |e|
-                e && e.valid? && e.respond_to?(:bounds) && fit_usable_bounds?(e.bounds)
-              end
-            end
-            fit_targets.each { |e| collect_fit_bounds(e, bb) }
-          end
-
-          if fit_usable_bounds?(bb)
-            center = bb.center
-            eye = Geom::Point3d.new(center.x, center.y, center.z + 1000)
-            target = center
-            up = Geom::Vector3d.new(0, 1, 0)
-            view.camera = Sketchup::Camera.new(eye, target, up)
-            view.camera.perspective = false
-            view.zoom(bb)
-          else
-            view.zoom_extents
-          end
-        end
-      rescue StandardError => e
-        Logger.warn("Pipeline", "Auto-fit view failed: #{e.message}")
+        imported_entities = model.active_entities.to_a - pre_import_entities
+      rescue StandardError
+        imported_entities = []
       end
+      apply_top_view_fit(model, page_fit_bounds, imported_entities)
 
       stats[:log_path] = Logger.log_path
       stats
