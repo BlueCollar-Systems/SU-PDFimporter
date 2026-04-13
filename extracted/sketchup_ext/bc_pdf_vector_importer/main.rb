@@ -627,6 +627,16 @@ module BlueCollarSystems
           # For text3d, baseline/matrix placement from stream parsing is usually
           # the most stable for rotated/angled dimensions and callouts.
           prefer_internal_text = text3d_mode || strict_text_processing
+          # Guard: skip internal parsing for very large streams (>5MB total).
+          # The internal Ruby parser is too slow for monster PDFs like GIS maps.
+          # Fall through to external pdftotext which handles them efficiently.
+          stream_bytes = streams.inject(0) { |sum, s| sum + s.length }
+          if stream_bytes > 5_000_000
+            Logger.warn("Pipeline",
+              "Page #{page_num}: #{(stream_bytes / 1_000_000.0).round(1)}MB streams — " \
+              "using external text extractor (internal parser too slow for this size)")
+            prefer_internal_text = false
+          end
           if prefer_internal_text
             font_maps = parser.page_font_maps(page_num)
             parser_opts = { strict_text_fidelity: strict_text_processing }
