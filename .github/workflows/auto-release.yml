@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   release:
-    if: "!startsWith(github.event.head_commit.message, 'chore: bump version to')"
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version to') && !contains(github.event.head_commit.message, 'automation/version-bump')"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
