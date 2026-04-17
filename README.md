@@ -3,7 +3,7 @@
 **BUILT. NOT BOUGHT.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-3.6.13-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-3.7.1-green.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-SketchUp%202017%2B-orange.svg)]()
 [![Ruby](https://img.shields.io/badge/Ruby-2.2%2B-red.svg)]()
 
@@ -21,22 +21,25 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 
 ## Key Features
 
-- **Pure-Ruby PDF parser** -- no gems or external dependencies required
+- **4 Import Modes** (BCS-ARCH-001) — Auto (default, picks strategy per page),
+  Vector, Raster, Hybrid. Every mode targets maximum fidelity.
+- **4 Text Rendering Options** — Labels, 3D Text, Glyphs, Geometry
+  (orthogonal to mode) + separate Import text toggle
+- **Pure-Ruby PDF parser** — no gems or external dependencies required
 - **Adaptive Bezier subdivision** with configurable flatness tolerance
 - **Kasa algebraic circle fitting** for arc reconstruction from point sequences
-- **OCG layer support** -- PDF Optional Content Groups map to SketchUp Tags
+- **OCG layer support** — PDF Optional Content Groups map to SketchUp Tags
 - **Color-based tag grouping** with dash pattern mapping
-- **Scale by Reference** tool -- select an edge, type the real-world dimension
-- **Quick Scale** with 15 architectural/engineering presets
-- **Architectural scale notation parsing** (1/4"=1'-0", 3/8"=1', etc.)
-- **Text import** as geometry or labels
-- **Raster fallback** for scanned pages
+- **Scale by Reference** tool — select an edge, type the real-world dimension
+- **Quick Scale** with 15 architectural/engineering ratio preferences
+  (`1/4"=1'-0"`, `3/8"=1'`, etc.)
+- **Architectural scale notation parsing**
 - **Import quality assessment** with warnings and performance metrics
 - **Post-import action workflow** (geometry only, scale, cleanup, feature inventory)
-- **Safe Mode import command** (Fast preset) for very dense/problem PDFs
 - **Native DXF bridge command** from the extension menu/toolbar
 - **Tag visibility controls** for PDF layers
 - **Document profiling** (fabrication, CAD, architectural, vector art, raster)
+  drives Auto-mode strategy selection
 - **FlateDecode decompression** for compressed PDF streams
 - **Form XObject recursion** for embedded PDF forms
 
@@ -44,7 +47,7 @@ The importer profiles each PDF document to identify its origin (fabrication draw
 
 ## Installation
 
-1. Download `bc_pdf_vector_importer_v3.6.7.rbz`
+1. Download the latest `bc_pdf_vector_importer_vX.Y.Z.rbz` from [Releases](https://github.com/BlueCollar-Systems/SU-PDFimporter/releases)
 2. In SketchUp: **Window > Extension Manager > Install Extension**
 3. Select the `.rbz` file
 4. Restart SketchUp if prompted
