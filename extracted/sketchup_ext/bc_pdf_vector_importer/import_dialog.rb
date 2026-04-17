@@ -1,7 +1,15 @@
 # bc_pdf_vector_importer/import_dialog.rb
-# Import dialog v5 — BCS-ARCH-001 4-mode system (Auto|Vector|Raster|Hybrid).
+# Import dialog v6 — BCS-ARCH-001 4-mode system + Rule 5 sweep.
 # HtmlDialog with Modus styling (Trimble design system).
-# Basic and Advanced dialogs, plain-English labels.
+#
+# BCS-ARCH-001 Rule 5 sweep: every quality-tier dial has been removed
+# from the UI. Users see exactly:
+#   1. Mode selector (Auto, Vector, Raster, Hybrid)
+#   2. Text rendering selector (Labels, 3D Text, Glyphs, Geometry)
+#   3. Import text Yes/No toggle
+# Plus legitimate workflow controls: pages, scale, grouping, page
+# arrangement. Quality parameters are consolidated to the values in
+# import_config.rb defaults — they are no longer adjustable.
 #
 # Falls back to UI.inputbox when HtmlDialog is unavailable (headless / test).
 #
@@ -21,76 +29,28 @@ module BlueCollarSystems
           'import_mode'        => 'auto',
           'text_mode'          => 'Labels',
           'import_text'        => 'Yes',
-          'import_fills'       => 'Yes',
-          'detect_arcs'        => 'Yes',
-          'map_dashes'         => 'Yes',
-          'bezier_segments'    => '32',
-          'merge_tolerance'    => '0.0005',
-          'cleanup_level'      => 'Balanced',
-          'arc_mode'           => 'Auto',
-          'lineweight_mode'    => 'Preserve visually',
-          'hatch_mode'         => 'Group',
           'grouping_mode'      => 'Group per page',
-          'force_raster'       => 'No',
-          'raster_fallback'    => 'Yes',
-          'raster_dpi'         => '300',
           'page_arrangement'   => 'Spread (20% gap)',
         }.freeze,
         'Vector' => {
           'import_mode'        => 'vector',
           'text_mode'          => 'Labels',
           'import_text'        => 'Yes',
-          'import_fills'       => 'Yes',
-          'detect_arcs'        => 'Yes',
-          'map_dashes'         => 'Yes',
-          'bezier_segments'    => '32',
-          'merge_tolerance'    => '0.0005',
-          'cleanup_level'      => 'Balanced',
-          'arc_mode'           => 'Auto',
-          'lineweight_mode'    => 'Preserve visually',
-          'hatch_mode'         => 'Group',
           'grouping_mode'      => 'Group per page',
-          'force_raster'       => 'No',
-          'raster_fallback'    => 'No',
-          'raster_dpi'         => '300',
           'page_arrangement'   => 'Spread (20% gap)',
         }.freeze,
         'Raster' => {
           'import_mode'        => 'raster',
           'text_mode'          => 'No text',
           'import_text'        => 'No',
-          'import_fills'       => 'No',
-          'detect_arcs'        => 'No',
-          'map_dashes'         => 'No',
-          'bezier_segments'    => '32',
-          'merge_tolerance'    => '0.0005',
-          'cleanup_level'      => 'Balanced',
-          'arc_mode'           => 'Auto',
-          'lineweight_mode'    => 'Ignore',
-          'hatch_mode'         => 'Skip',
           'grouping_mode'      => 'Single group',
-          'force_raster'       => 'Yes',
-          'raster_fallback'    => 'Yes',
-          'raster_dpi'         => '300',
           'page_arrangement'   => 'Spread (20% gap)',
         }.freeze,
         'Hybrid' => {
           'import_mode'        => 'hybrid',
           'text_mode'          => 'Labels',
           'import_text'        => 'Yes',
-          'import_fills'       => 'Yes',
-          'detect_arcs'        => 'Yes',
-          'map_dashes'         => 'Yes',
-          'bezier_segments'    => '32',
-          'merge_tolerance'    => '0.0005',
-          'cleanup_level'      => 'Balanced',
-          'arc_mode'           => 'Auto',
-          'lineweight_mode'    => 'Preserve visually',
-          'hatch_mode'         => 'Group',
           'grouping_mode'      => 'Group per page',
-          'force_raster'       => 'No',
-          'raster_fallback'    => 'Yes',
-          'raster_dpi'         => '300',
           'page_arrangement'   => 'Spread (20% gap)',
         }.freeze,
       }.freeze
@@ -98,13 +58,9 @@ module BlueCollarSystems
       YES_NO       = 'Yes|No'
       MODE_NAMES   = MODES.keys.join('|')
       TEXT_MODES   = 'Labels|3D Text|Glyphs|Geometry'
-      HATCH_MODES  = 'Import|Group|Skip'
 
-      # Phase 2 dropdown choices
-      ARC_MODE_CHOICES       = 'Auto|Preserve curves|Rebuild arcs|Polyline only'
-      CLEANUP_LEVEL_CHOICES  = 'Conservative|Balanced|Aggressive'
-      LINEWEIGHT_CHOICES     = 'Ignore|Preserve visually|Group by lineweight|Map to tags'
-      GROUPING_CHOICES       = 'Single group|Group per page|Group per layer|Group per color|Nested: page > layer|Nested: page > lineweight'
+      # Workflow choices kept after the Rule 5 sweep
+      GROUPING_CHOICES         = 'Single group|Group per page|Group per layer|Group per color|Nested: page > layer|Nested: page > lineweight'
       PAGE_ARRANGEMENT_CHOICES = 'Spread (20% gap)|Compact gap|Touching pages|Overlay pages'
 
       def self.show(filepath)
@@ -181,36 +137,23 @@ module BlueCollarSystems
         result
       end
 
-      # ---- HtmlDialog: Advanced -------------------------------------
+      # ---- HtmlDialog: Advanced (workflow only — quality dials gone) ---
       def self.show_html_advanced(filename, pages_str, scale_str, text_mode_str, saved)
         result = nil
         dlg = UI::HtmlDialog.new(
           dialog_title: "Advanced Import \u2014 #{filename}",
           preferences_key: 'BC_PDFImport_Advanced',
-          width: 480, height: 620, resizable: true
+          width: 460, height: 380, resizable: false
         )
 
         d = {
           mode:             saved[:last_mode]                          || 'Auto',
           pages:            pages_str      || saved[:pages]            || 'All',
           scale:            scale_str      || saved[:scale]            || '1.0',
-          bezier_segments:  saved[:bezier_segments]                    || '32',
           text_mode:        text_mode_str  || saved[:text_mode]        || 'Labels',
           import_text:      saved[:import_text]                        || 'Yes',
-          hatch_mode:       saved[:hatch_mode]                         || 'Group',
-          detect_arcs:      saved[:detect_arcs]                        || 'Yes',
-          map_dashes:       saved[:map_dashes]                         || 'Yes',
-          import_fills:     saved[:import_fills]                       || 'Yes',
-          cleanup_geometry: saved[:cleanup_geometry]                   || 'Yes',
-          force_raster:     saved[:force_raster]                       || 'No',
-          raster_fallback:  saved[:raster_fallback]                    || 'Yes',
-          raster_dpi:       saved[:raster_dpi]                         || '300',
-          arc_mode:         saved[:arc_mode]                           || 'Auto',
-          cleanup_level:    saved[:cleanup_level]                      || 'Balanced',
-          lineweight_mode:  saved[:lineweight_mode]                    || 'Preserve visually',
           grouping_mode:    saved[:grouping_mode]                      || 'Group per page',
           page_arrangement: saved[:page_arrangement]                   || 'Spread (20% gap)',
-          page_gap_ratio:   saved[:page_gap_ratio]                     || '0.20'
         }
 
         dlg.set_html(advanced_html(filename, d))
@@ -219,35 +162,21 @@ module BlueCollarSystems
           save_prefs(
             last_mode: p['mode'],
             pages: p['pages'], scale: p['scale'],
-            bezier_segments: p['bezier_segments'],
             text_mode: p['text_mode'], import_text: p['import_text'],
-            hatch_mode: p['hatch_mode'],
-            detect_arcs: p['detect_arcs'], map_dashes: p['map_dashes'],
-            import_fills: p['import_fills'],
-            cleanup_geometry: p['cleanup_geometry'],
-            force_raster: p['force_raster'],
-            raster_fallback: p['raster_fallback'], raster_dpi: p['raster_dpi'],
-            arc_mode: p['arc_mode'], cleanup_level: p['cleanup_level'],
-            lineweight_mode: p['lineweight_mode'], grouping_mode: p['grouping_mode'],
-            page_arrangement: p['page_arrangement'], page_gap_ratio: p['page_gap_ratio']
+            grouping_mode: p['grouping_mode'],
+            page_arrangement: p['page_arrangement']
           )
-          import_as = p['import_fills'] == 'Yes' ? 'Edges and Faces' : 'Edges Only'
+          mode_raw = MODES[p['mode'] || 'Auto'] || MODES['Auto']
           result = build_opts(
-            import_mode: (MODES[p['mode'] || 'Auto'] || MODES['Auto'])['import_mode'],
+            import_mode: mode_raw['import_mode'],
             pages: p['pages'], scale: p['scale'],
-            bezier_segments: p['bezier_segments'],
-            import_as: import_as, layer_name: 'PDF Import',
-            group_per_page: 'Yes', import_fills: p['import_fills'],
-            group_by_color: 'Yes', detect_arcs: p['detect_arcs'],
-            map_dashes: p['map_dashes'], text_mode: p['text_mode'],
+            layer_name: 'PDF Import',
+            group_per_page: 'Yes',
+            group_by_color: 'Yes',
+            text_mode: p['text_mode'],
             import_text: p['import_text'],
-            hatch_mode: p['hatch_mode'],
-            raster_fallback: p['raster_fallback'], cleanup_geometry: p['cleanup_geometry'],
-            force_raster: p['force_raster'], raster_dpi: p['raster_dpi'],
-            recognition_mode: 'None', merge_tolerance: '0.0005', units: 'Inches',
-            arc_mode: p['arc_mode'], cleanup_level: p['cleanup_level'],
-            lineweight_mode: p['lineweight_mode'], grouping_mode: p['grouping_mode'],
-            page_arrangement: p['page_arrangement'], page_gap_ratio: p['page_gap_ratio']
+            grouping_mode: p['grouping_mode'],
+            page_arrangement: p['page_arrangement']
           )
           dlg.close
         end
@@ -351,12 +280,6 @@ module BlueCollarSystems
       end
 
       def self.advanced_html(filename, d)
-        yn = lambda { |key|
-          yes = d[key] == 'Yes' ? ' selected' : ''
-          no  = d[key] == 'No'  ? ' selected' : ''
-          "<option value=\"Yes\"#{yes}>Yes</option><option value=\"No\"#{no}>No</option>"
-        }
-
         mode_opts = MODES.keys.map { |m|
           sel = d[:mode] == m ? ' selected' : ''
           "<option value=\"#{esc(m)}\"#{sel}>#{esc(m)}</option>"
@@ -367,25 +290,11 @@ module BlueCollarSystems
           "<option value=\"#{v}\"#{sel}>#{lbl}</option>"
         }.join
 
-        hatch_opts = [['Import','Import'],['Group','Group'],['Skip','Skip']].map{|v,lbl|
-          sel = d[:hatch_mode] == v ? ' selected' : ''
-          "<option value=\"#{v}\"#{sel}>#{lbl}</option>"
-        }.join
-
-        arc_mode_opts = ARC_MODE_CHOICES.split('|').map{|v|
-          sel = d[:arc_mode] == v ? ' selected' : ''
-          "<option value=\"#{esc(v)}\"#{sel}>#{esc(v)}</option>"
-        }.join
-
-        cleanup_level_opts = CLEANUP_LEVEL_CHOICES.split('|').map{|v|
-          sel = d[:cleanup_level] == v ? ' selected' : ''
-          "<option value=\"#{esc(v)}\"#{sel}>#{esc(v)}</option>"
-        }.join
-
-        lineweight_opts = LINEWEIGHT_CHOICES.split('|').map{|v|
-          sel = d[:lineweight_mode] == v ? ' selected' : ''
-          "<option value=\"#{esc(v)}\"#{sel}>#{esc(v)}</option>"
-        }.join
+        yn = lambda { |key|
+          yes = d[key] == 'Yes' ? ' selected' : ''
+          no  = d[key] == 'No'  ? ' selected' : ''
+          "<option value=\"Yes\"#{yes}>Yes</option><option value=\"No\"#{no}>No</option>"
+        }
 
         grouping_opts = GROUPING_CHOICES.split('|').map{|v|
           sel = d[:grouping_mode] == v ? ' selected' : ''
@@ -399,7 +308,7 @@ module BlueCollarSystems
 
         <<-HTML
           <!DOCTYPE html><html><head><meta charset="utf-8">
-          <style>#{DIALOG_CSS}body{overflow-y:auto}</style></head><body>
+          <style>#{DIALOG_CSS}</style></head><body>
           <h2>Advanced Import Settings</h2>
           <p class="sub">#{esc(filename)}</p>
           <div class="row2">
@@ -412,67 +321,19 @@ module BlueCollarSystems
             <div><label>Scale Factor</label>
               <input type="text" id="scale" value="#{esc(d[:scale])}" placeholder="1.0"></div>
           </div>
-          <div class="section">Geometry</div>
-          <div class="row2">
-            <div><label>Curve Smoothness</label>
-              <input type="text" id="bezier_segments" value="#{esc(d[:bezier_segments])}" placeholder="32">
-              <p class="hint">4=fast &bull; 48=smooth</p></div>
-            <div><label>Rebuild Arcs</label>
-              <select id="detect_arcs">#{yn.call(:detect_arcs)}</select></div>
-          </div>
-          <div class="row2">
-            <div><label>Import Filled Regions</label>
-              <select id="import_fills">#{yn.call(:import_fills)}</select></div>
-            <div><label>Auto-Clean Geometry</label>
-              <select id="cleanup_geometry">#{yn.call(:cleanup_geometry)}</select></div>
-          </div>
-          <div class="section">Styling</div>
-          <div class="row2">
-            <div><label>Map Dashed Lines</label>
-              <select id="map_dashes">#{yn.call(:map_dashes)}</select></div>
-          </div>
-          <div class="section">Text &amp; Hatching</div>
+          <div class="section">Text</div>
           <div class="row2">
             <div><label>Import Text</label>
               <select id="import_text">#{yn.call(:import_text)}</select></div>
             <div><label>Text Rendering</label>
               <select id="text_mode">#{text_opts}</select></div>
           </div>
+          <div class="section">Layout</div>
           <div class="row2">
-            <div><label>Hatching</label>
-              <select id="hatch_mode">#{hatch_opts}</select></div>
-          </div>
-          <div class="section">Advanced Controls</div>
-          <div class="row2">
-            <div><label>Arc Mode</label>
-              <select id="arc_mode">#{arc_mode_opts}</select></div>
-            <div><label>Cleanup Level</label>
-              <select id="cleanup_level">#{cleanup_level_opts}</select></div>
-          </div>
-          <div class="row2">
-            <div><label>Lineweight Handling</label>
-              <select id="lineweight_mode">#{lineweight_opts}</select></div>
             <div><label>Grouping Mode</label>
               <select id="grouping_mode">#{grouping_opts}</select></div>
-          </div>
-          <div class="section">Multi-Page Layout</div>
-          <div class="row2">
             <div><label>Page Arrangement</label>
               <select id="page_arrangement">#{page_arrangement_opts}</select></div>
-            <div><label>Compact Gap Ratio</label>
-              <input type="text" id="page_gap_ratio" value="#{esc(d[:page_gap_ratio])}" placeholder="0.20">
-              <p class="hint">Used only for Compact gap mode.</p></div>
-          </div>
-          <div class="section">Raster</div>
-          <div class="row2">
-            <div><label>Force Raster</label>
-              <select id="force_raster">#{yn.call(:force_raster)}</select></div>
-            <div><label>Raster Fallback</label>
-              <select id="raster_fallback">#{yn.call(:raster_fallback)}</select></div>
-          </div>
-          <div class="row2">
-            <div><label>Raster DPI (200&ndash;600)</label>
-              <input type="text" id="raster_dpi" value="#{esc(d[:raster_dpi])}" placeholder="300"></div>
           </div>
           <div class="actions">
             <button class="btn btn-secondary" onclick="cancel()">Cancel</button>
@@ -483,23 +344,10 @@ module BlueCollarSystems
             mode:document.getElementById('mode').value,
             pages:document.getElementById('pages').value.trim()||'All',
             scale:document.getElementById('scale').value.trim()||'1.0',
-            bezier_segments:document.getElementById('bezier_segments').value.trim()||'32',
             import_text:document.getElementById('import_text').value,
             text_mode:document.getElementById('text_mode').value,
-            hatch_mode:document.getElementById('hatch_mode').value,
-            detect_arcs:document.getElementById('detect_arcs').value,
-            map_dashes:document.getElementById('map_dashes').value,
-            import_fills:document.getElementById('import_fills').value,
-            cleanup_geometry:document.getElementById('cleanup_geometry').value,
-            force_raster:document.getElementById('force_raster').value,
-            raster_fallback:document.getElementById('raster_fallback').value,
-            raster_dpi:document.getElementById('raster_dpi').value.trim()||'300',
-            arc_mode:document.getElementById('arc_mode').value,
-            cleanup_level:document.getElementById('cleanup_level').value,
-            lineweight_mode:document.getElementById('lineweight_mode').value,
             grouping_mode:document.getElementById('grouping_mode').value,
-            page_arrangement:document.getElementById('page_arrangement').value,
-            page_gap_ratio:document.getElementById('page_gap_ratio').value.trim()||'0.20'});}
+            page_arrangement:document.getElementById('page_arrangement').value});}
           function cancel(){sketchup.on_cancel({});}
           document.addEventListener('keydown',function(e){if(e.key==='Escape')cancel();});
           </script></body></html>
@@ -534,62 +382,36 @@ module BlueCollarSystems
 
       def self.show_inputbox_advanced(filename, pages_str, scale_str, text_mode_str, saved)
         prompts = [
-          "Mode:","Pages:","Scale Factor:","Curve Smoothness (4=fast, 48=smooth):",
-          "Import Text:","Text Rendering:","Hatchings:","Rebuild Arcs from Curves:",
-          "Map Dashed/Hidden Lines:","Import Filled Regions:",
-          "Auto-Clean Geometry:","Force Raster Image (skip vectors):",
-          "Raster Fallback:","Raster DPI (200-600):",
-          "Arc Mode:","Cleanup Level:","Lineweight Handling:","Grouping Mode:",
-          "Page Arrangement:","Compact Gap Ratio (0.00-1.00):"
+          "Mode:","Pages:","Scale Factor:",
+          "Import Text:","Text Rendering:",
+          "Grouping Mode:","Page Arrangement:"
         ]
         defaults = [
           saved[:last_mode]||'Auto',
           pages_str||saved[:pages]||'All', scale_str||saved[:scale]||'1.0',
-          saved[:bezier_segments]||'32',
           saved[:import_text]||'Yes',
           text_mode_str||saved[:text_mode]||'Labels',
-          saved[:hatch_mode]||'Group', saved[:detect_arcs]||'Yes',
-          saved[:map_dashes]||'Yes',   saved[:import_fills]||'Yes',
-          saved[:cleanup_geometry]||'Yes', saved[:force_raster]||'No',
-          saved[:raster_fallback]||'Yes',
-          saved[:raster_dpi]||'300',
-          saved[:arc_mode]||'Auto', saved[:cleanup_level]||'Balanced',
-          saved[:lineweight_mode]||'Preserve visually', saved[:grouping_mode]||'Group per page',
-          saved[:page_arrangement]||'Spread (20% gap)', saved[:page_gap_ratio]||'0.20'
+          saved[:grouping_mode]||'Group per page',
+          saved[:page_arrangement]||'Spread (20% gap)'
         ]
-        dropdowns = [MODE_NAMES,'','','',YES_NO,TEXT_MODES,HATCH_MODES,YES_NO,YES_NO,YES_NO,YES_NO,YES_NO,YES_NO,'',
-                     ARC_MODE_CHOICES,CLEANUP_LEVEL_CHOICES,LINEWEIGHT_CHOICES,GROUPING_CHOICES,
-                     PAGE_ARRANGEMENT_CHOICES,'']
+        dropdowns = [MODE_NAMES,'','',YES_NO,TEXT_MODES,GROUPING_CHOICES,PAGE_ARRANGEMENT_CHOICES]
         result = UI.inputbox(prompts, defaults, dropdowns, "Advanced Import \u2014 #{filename}")
         return nil unless result
-        p_mode,p_pages,p_scale,p_bezier,p_import_text,p_text_mode,p_hatch,
-        p_arcs,p_dashes,p_fills,p_cleanup,p_force_raster,p_raster_fallback,p_raster_dpi,
-        p_arc_mode,p_cleanup_level,p_lineweight_mode,p_grouping_mode,
-        p_page_arrangement,p_page_gap_ratio = result
-        save_prefs(last_mode:p_mode,pages:p_pages,scale:p_scale,bezier_segments:p_bezier,
-                   import_text:p_import_text,text_mode:p_text_mode,hatch_mode:p_hatch,
-                   detect_arcs:p_arcs,map_dashes:p_dashes,import_fills:p_fills,
-                   cleanup_geometry:p_cleanup,force_raster:p_force_raster,
-                   raster_fallback:p_raster_fallback,raster_dpi:p_raster_dpi,
-                   arc_mode:p_arc_mode,
-                   cleanup_level:p_cleanup_level,lineweight_mode:p_lineweight_mode,
+        p_mode,p_pages,p_scale,p_import_text,p_text_mode,
+        p_grouping_mode,p_page_arrangement = result
+        save_prefs(last_mode:p_mode,pages:p_pages,scale:p_scale,
+                   import_text:p_import_text,text_mode:p_text_mode,
                    grouping_mode:p_grouping_mode,
-                   page_arrangement:p_page_arrangement,page_gap_ratio:p_page_gap_ratio)
-        import_as = p_fills == 'Yes' ? 'Edges and Faces' : 'Edges Only'
+                   page_arrangement:p_page_arrangement)
         mode_raw = MODES[p_mode] || MODES['Auto']
         build_opts(import_mode:mode_raw['import_mode'],
-                   pages:p_pages,scale:p_scale,bezier_segments:p_bezier,
-                   import_as:import_as,layer_name:'PDF Import',
-                   group_per_page:'Yes',import_fills:p_fills,
-                   group_by_color:'Yes',detect_arcs:p_arcs,
-                   map_dashes:p_dashes,
-                   import_text:p_import_text,text_mode:p_text_mode,hatch_mode:p_hatch,
-                   raster_fallback:p_raster_fallback,cleanup_geometry:p_cleanup,
-                   force_raster:p_force_raster,raster_dpi:p_raster_dpi,
-                   recognition_mode:'None',merge_tolerance:'0.0005',units:'Inches',
-                   arc_mode:p_arc_mode,cleanup_level:p_cleanup_level,
-                   lineweight_mode:p_lineweight_mode,grouping_mode:p_grouping_mode,
-                   page_arrangement:p_page_arrangement,page_gap_ratio:p_page_gap_ratio)
+                   pages:p_pages,scale:p_scale,
+                   layer_name:'PDF Import',
+                   group_per_page:'Yes',
+                   group_by_color:'Yes',
+                   import_text:p_import_text,text_mode:p_text_mode,
+                   grouping_mode:p_grouping_mode,
+                   page_arrangement:p_page_arrangement)
       end
 
       private
@@ -618,21 +440,6 @@ module BlueCollarSystems
           pages = :all if pages.empty?
         end
 
-        bezier = (raw[:bezier_segments] || '32').to_i
-        bezier = [[bezier, 4].max, 64].min
-
-        import_as = case (raw[:import_as] || '')
-                    when /Faces Only/i      then :faces
-                    when /Edges and Faces/i then :both
-                    else :edges
-                    end
-
-        recog = case (raw[:recognition_mode] || '')
-                when /None/i    then :none
-                when /Generic/i then :generic
-                else :auto
-                end
-
         # BCS-ARCH-001 text resolver: Labels|3D Text|Glyphs|Geometry
         # Import Text checkbox is the orthogonal on/off control.
         import_text_flag = (raw[:import_text] || 'Yes') == 'Yes'
@@ -649,44 +456,46 @@ module BlueCollarSystems
         import_text = (text_mode != :none)
         use_3d_text = (text_mode == :text3d)
 
-        hatch = case (raw[:hatch_mode] || 'Group')
-                when /Skip/i  then :skip
-                when /Group/i then :group
-                else :import
-                end
-
         # BCS-ARCH-001 mode resolver. Accepts either a mode string
         # ('auto'|'vector'|'raster'|'hybrid') or defaults to 'auto'.
         mode_str = (raw[:import_mode] || 'auto').to_s.downcase
         mode_str = 'auto' unless %w[auto vector raster hybrid].include?(mode_str)
 
+        # Mode-specific quality consolidation per BCS-ARCH-001:
+        # Raster mode skips arcs / dashes / fills; everything else is on.
+        is_raster = (mode_str == 'raster')
+
+        # Consolidated defaults (BCS-ARCH-001 Rule 5 — every mode targets
+        # identical "indistinguishable from source" quality; quality dials
+        # are never user-adjustable). These values come from the
+        # parameter table in import_config.rb.
         {
           scale:            scale,
           pages:            pages,
-          bezier_segments:  bezier,
-          import_as:        import_as,
+          bezier_segments:  32,
+          import_as:        is_raster ? :edges : :both,
           layer_name:       (raw[:layer_name] || 'PDF Import').to_s.strip,
           group_per_page:   (raw[:group_per_page] || 'Yes') == 'Yes',
           flatten_to_2d:    true,
-          merge_tolerance:  (raw[:merge_tolerance] || '0.0005').to_f.abs,
-          import_fills:     (raw[:import_fills] || 'Yes') == 'Yes',
+          merge_tolerance:  0.0005,
+          import_fills:     !is_raster,
           group_by_color:   (raw[:group_by_color] || 'Yes') == 'Yes',
-          detect_arcs:      (raw[:detect_arcs] || 'Yes') == 'Yes',
-          map_dashes:       (raw[:map_dashes] || 'Yes') == 'Yes',
+          detect_arcs:      !is_raster,
+          map_dashes:       !is_raster,
           import_text:      import_text,
           text_mode:        text_mode,
           use_3d_text:      use_3d_text,
-          hatch_mode:       hatch,
-          raster_fallback:  (raw[:raster_fallback] || 'Yes') == 'Yes',
-          force_raster:     (raw[:force_raster] || 'No') == 'Yes',
-          raster_dpi:       [[((raw[:raster_dpi] || '300').to_i), 200].max, 600].min,
+          hatch_mode:       is_raster ? :skip : :group,
+          raster_fallback:  (mode_str == 'auto' || mode_str == 'hybrid' || is_raster),
+          force_raster:     is_raster,
+          raster_dpi:       300,
           page_arrangement: (raw[:page_arrangement] || 'Spread (20% gap)').to_s,
-          page_gap_ratio:   [[(raw[:page_gap_ratio] || '0.20').to_f, 0.0].max, 1.0].min,
-          cleanup_geometry: (raw[:cleanup_geometry] || 'Yes') == 'Yes',
-          recognition_mode: recog,
-          arc_mode:         (raw[:arc_mode] || 'Auto').to_s,
-          cleanup_level:    (raw[:cleanup_level] || 'Balanced').to_s,
-          lineweight_mode:  (raw[:lineweight_mode] || 'Preserve visually').to_s,
+          page_gap_ratio:   0.20,
+          cleanup_geometry: true,
+          recognition_mode: :auto,
+          arc_mode:         'Auto',
+          cleanup_level:    'Balanced',
+          lineweight_mode:  is_raster ? 'Ignore' : 'Preserve visually',
           grouping_mode:    (raw[:grouping_mode] || 'Group per page').to_s,
           import_mode:      mode_str
         }
@@ -697,13 +506,11 @@ module BlueCollarSystems
       def self.load_prefs
         prefs = {}
         begin
-          %w[last_mode pages scale bezier_segments import_as layer_name
-             group_per_page import_fills group_by_color detect_arcs
-             map_dashes import_text text_mode hatch_mode
-             raster_fallback force_raster
-             raster_dpi cleanup_geometry recognition_mode merge_tolerance units
-             arc_mode cleanup_level lineweight_mode grouping_mode
-             page_arrangement page_gap_ratio import_mode
+          %w[last_mode pages scale layer_name
+             group_per_page group_by_color
+             import_text text_mode
+             grouping_mode
+             page_arrangement import_mode
           ].each do |key|
             val = Sketchup.read_default(PREF_KEY, key, nil)
             prefs[key.to_sym] = val if val
