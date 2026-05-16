@@ -27,14 +27,14 @@ module BlueCollarSystems
       MODES = {
         'Auto' => {
           'import_mode'        => 'auto',
-          'text_mode'          => 'Labels',
+          'text_mode'          => '3D Text',
           'import_text'        => 'Yes',
           'grouping_mode'      => 'Group per page',
           'page_arrangement'   => 'Spread (20% gap)',
         }.freeze,
         'Vector' => {
           'import_mode'        => 'vector',
-          'text_mode'          => 'Labels',
+          'text_mode'          => '3D Text',
           'import_text'        => 'Yes',
           'grouping_mode'      => 'Group per page',
           'page_arrangement'   => 'Spread (20% gap)',
@@ -48,7 +48,7 @@ module BlueCollarSystems
         }.freeze,
         'Hybrid' => {
           'import_mode'        => 'hybrid',
-          'text_mode'          => 'Labels',
+          'text_mode'          => '3D Text',
           'import_text'        => 'Yes',
           'grouping_mode'      => 'Group per page',
           'page_arrangement'   => 'Spread (20% gap)',
@@ -92,10 +92,10 @@ module BlueCollarSystems
           width: 440, height: 340, resizable: false
         )
 
-        mode_val    = saved[:last_mode] || 'Auto'
+        mode_val    = valid_mode_name(saved[:last_mode])
         pages_val   = saved[:pages]       || 'All'
         scale_val   = saved[:scale]       || '1.0'
-        text_val    = saved[:text_mode]   || 'Labels'
+        text_val    = saved[:text_mode]   || '3D Text'
         itext_val   = saved[:import_text] || 'Yes'
 
         dlg.set_html(basic_html(filename, mode_val, pages_val, scale_val, text_val, itext_val))
@@ -104,7 +104,7 @@ module BlueCollarSystems
           mode_name   = p['mode']        || 'Auto'
           pages_str   = p['pages']       || 'All'
           scale_str   = p['scale']       || '1.0'
-          text_mode   = p['text_mode']   || 'Labels'
+          text_mode   = p['text_mode']   || '3D Text'
           import_text = p['import_text'] || 'Yes'
           save_prefs(last_mode: mode_name, pages: pages_str,
                      scale: scale_str, text_mode: text_mode,
@@ -125,12 +125,12 @@ module BlueCollarSystems
           save_prefs(last_mode: p['mode'] || 'Auto',
                      pages: p['pages']     || 'All',
                      scale: p['scale']     || '1.0',
-                     text_mode: p['text_mode'] || 'Labels',
+                     text_mode: p['text_mode'] || '3D Text',
                      import_text: p['import_text'] || 'Yes')
           dlg.close
           result = show_html_advanced(filename, p['pages'] || 'All',
                                       p['scale'] || '1.0',
-                                      p['text_mode'] || 'Labels',
+                                      p['text_mode'] || '3D Text',
                                       load_prefs)
         end
         dlg.show_modal
@@ -147,10 +147,10 @@ module BlueCollarSystems
         )
 
         d = {
-          mode:             saved[:last_mode]                          || 'Auto',
+          mode:             valid_mode_name(saved[:last_mode]),
           pages:            pages_str      || saved[:pages]            || 'All',
           scale:            scale_str      || saved[:scale]            || '1.0',
-          text_mode:        text_mode_str  || saved[:text_mode]        || 'Labels',
+          text_mode:        text_mode_str  || saved[:text_mode]        || '3D Text',
           import_text:      saved[:import_text]                        || 'Yes',
           grouping_mode:    saved[:grouping_mode]                      || 'Group per page',
           page_arrangement: saved[:page_arrangement]                   || 'Spread (20% gap)',
@@ -362,9 +362,9 @@ module BlueCollarSystems
       def self.show_inputbox_basic(filename, saved)
         prompts   = ["Mode:","Pages (1, 1-5, or All):","Scale Factor:",
                      "Import Text:","Text Rendering:"]
-        last_m    = saved[:last_mode] || 'Auto'
+        last_m    = valid_mode_name(saved[:last_mode])
         defaults  = [last_m, saved[:pages]||'All', saved[:scale]||'1.0',
-                     saved[:import_text]||'Yes', saved[:text_mode]||'Labels']
+                     saved[:import_text]||'Yes', saved[:text_mode]||'3D Text']
         dropdowns = [MODE_NAMES, '', '', YES_NO, TEXT_MODES]
         result = UI.inputbox(prompts, defaults, dropdowns, "Import PDF \u2014 #{filename}")
         return nil unless result
@@ -387,10 +387,10 @@ module BlueCollarSystems
           "Grouping Mode:","Page Arrangement:"
         ]
         defaults = [
-          saved[:last_mode]||'Auto',
+          valid_mode_name(saved[:last_mode]),
           pages_str||saved[:pages]||'All', scale_str||saved[:scale]||'1.0',
           saved[:import_text]||'Yes',
-          text_mode_str||saved[:text_mode]||'Labels',
+          text_mode_str||saved[:text_mode]||'3D Text',
           saved[:grouping_mode]||'Group per page',
           saved[:page_arrangement]||'Spread (20% gap)'
         ]
@@ -443,7 +443,7 @@ module BlueCollarSystems
         # BCS-ARCH-001 text resolver: Labels|3D Text|Glyphs|Geometry
         # Import Text checkbox is the orthogonal on/off control.
         import_text_flag = (raw[:import_text] || 'Yes') == 'Yes'
-        text_mode_raw = (raw[:text_mode] || 'Labels').to_s
+        text_mode_raw = (raw[:text_mode] || '3D Text').to_s
         text_mode = case text_mode_raw
                     when /No text/i           then :labels   # legacy string — treated as labels, gated by import_text_flag
                     when /\A3D\s*Text\z/i     then :text3d
@@ -502,11 +502,12 @@ module BlueCollarSystems
       end
 
       PREF_KEY = 'BlueCollarSystems_PDFVectorImporter'.freeze
+      PREF_MIGRATE_TEXT_DEFAULT_KEY = 'text_mode_default_migrated_v372'.freeze
 
       def self.load_prefs
         prefs = {}
         begin
-          %w[last_mode pages scale layer_name
+          %w[last_mode last_preset pages scale layer_name
              group_per_page group_by_color
              import_text text_mode
              grouping_mode
@@ -514,6 +515,23 @@ module BlueCollarSystems
           ].each do |key|
             val = Sketchup.read_default(PREF_KEY, key, nil)
             prefs[key.to_sym] = val if val
+          end
+          # v3.7.2: migrate the old Labels default once. SketchUp labels are
+          # screen-facing annotations, so dense steel sheets can look wildly
+          # oversized compared with the PDF. Users can still choose Labels
+          # after migration; the flag prevents repeated overrides.
+          migrated = Sketchup.read_default(PREF_KEY, PREF_MIGRATE_TEXT_DEFAULT_KEY, nil)
+          if prefs[:text_mode].to_s == 'Labels' && migrated.to_s != 'Yes'
+            prefs[:text_mode] = '3D Text'
+            Sketchup.write_default(PREF_KEY, 'text_mode', '3D Text')
+            Sketchup.write_default(PREF_KEY, PREF_MIGRATE_TEXT_DEFAULT_KEY, 'Yes')
+          end
+          if prefs[:last_mode] && !MODES.key?(prefs[:last_mode].to_s)
+            prefs[:last_mode] = 'Auto'
+            Sketchup.write_default(PREF_KEY, 'last_mode', 'Auto')
+          end
+          if prefs[:last_preset]
+            Sketchup.write_default(PREF_KEY, 'last_preset', 'Auto')
           end
         rescue StandardError => e
           Logger.warn("ImportDialog", "load_prefs failed: #{e.message}")
@@ -527,6 +545,10 @@ module BlueCollarSystems
         rescue StandardError => e
           Logger.warn("ImportDialog", "save_prefs failed: #{e.message}")
         end
+      end
+
+      def self.valid_mode_name(name)
+        MODES.key?(name.to_s) ? name.to_s : 'Auto'
       end
 
     end
